@@ -6,9 +6,9 @@ This file provides guidance to Claude Code when working with this repository.
 
 Evaluation harness for the [dotnet-skills](https://github.com/Aaronontheweb/dotnet-skills) Claude Code marketplace plugin. Uses DSPy to test skill activation accuracy, skill effectiveness, and size impact via the Anthropic API.
 
-## Key Constraint: Single-File Skills
+## Skill Authoring: Progressive Disclosure
 
-**Skills must remain as single SKILL.md files.** The dotnet-skills plugin serves Claude Code, GitHub Copilot, and OpenCode. Copilot only reads the main SKILL.md file and cannot follow references to sibling files. Progressive disclosure (multi-file splitting) is off the table. If skills need improvement, restructure or trim within the single file.
+All three platforms (Claude Code, GitHub Copilot, OpenCode) support multi-file skill directories with progressive disclosure. SKILL.md should be kept under 500 lines as a focused entry point, with detailed examples and reference material in sibling files loaded on demand. See [Claude skill best practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices#progressive-disclosure-patterns).
 
 ## Project Layout
 
@@ -25,7 +25,7 @@ Evaluation harness for the [dotnet-skills](https://github.com/Aaronontheweb/dotn
 ## External Dependencies
 
 - **dotnet-skills repo**: Located at `~/repositories/dotnet-skills`. The skill loader reads SKILL.md files directly from this path. Configurable via `DOTNET_SKILLS_REPO` env var.
-- **Anthropic API**: Required for running evals. Set `ANTHROPIC_API_KEY` in `.env`.
+- **OpenRouter API**: Required for running evals. Set `OPENROUTER_API_KEY` in `.env`.
 
 ## Development
 
