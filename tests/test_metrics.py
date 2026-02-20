@@ -2,7 +2,7 @@
 
 import pytest
 
-from dotnet_skills_evals.eval_activation.metrics import (
+from dotnet_skills_evals.eval_activation_quiz.metrics import (
     activation_accuracy,
     precision_at_k,
     recall,

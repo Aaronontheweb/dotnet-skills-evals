@@ -37,7 +37,80 @@ def cli():
     """
 
 
-@cli.command()
+@cli.command("eval-activation")
+@click.option(
+    "--model",
+    type=click.Choice(["haiku", "sonnet", "opus"]),
+    default="haiku",
+    help="Model to use for evaluation.",
+)
+@click.option(
+    "--mechanism",
+    "mechanisms",
+    multiple=True,
+    type=click.Choice(["tool", "compressed", "fat"]),
+    default=("tool", "compressed", "fat"),
+    help="Discovery mechanism(s) to test. Defaults to all three.",
+)
+@click.option(
+    "--dataset",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="Path to JSONL dataset file.",
+)
+@click.option(
+    "--skills-repo",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to dotnet-skills repository.",
+)
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to write JSON results file.",
+)
+def eval_activation(
+    model: str,
+    mechanisms: tuple[str, ...],
+    dataset: Path,
+    skills_repo: Path | None,
+    output: Path | None,
+):
+    """Evaluate realistic skill activation across discovery mechanisms.
+
+    Simulates a realistic coding session where the model must independently
+    decide whether to use available skills. Compares tool-based, compressed
+    index, and fat index discovery mechanisms.
+    """
+    from .eval_activation.runner import run_activation_eval
+    from .reporting.results import (
+        print_activation_v2_results,
+        export_activation_v2_json,
+    )
+
+    mech_list = list(mechanisms)
+    console.print(f"[bold]Running activation eval[/bold] (model={model})")
+    console.print(f"Mechanisms: {', '.join(mech_list)}")
+    console.print(f"Dataset: {dataset}")
+
+    results_by_mechanism = run_activation_eval(
+        model=model,
+        dataset_path=dataset,
+        mechanism_names=mech_list,
+        skills_repo=skills_repo,
+    )
+
+    print_activation_v2_results(results_by_mechanism)
+
+    # Always save results
+    out = output or _auto_output_path(
+        "activation", model, mechanisms="+".join(mech_list)
+    )
+    export_activation_v2_json(results_by_mechanism, out)
+
+
+@cli.command("eval-activation-quiz")
 @click.option(
     "--model",
     type=click.Choice(["haiku", "sonnet", "opus"]),
@@ -67,22 +140,24 @@ def cli():
     default=None,
     help="Path to write JSON results file.",
 )
-def eval_activation(
+def eval_activation_quiz(
     model: str,
     with_index: bool,
     dataset: Path,
     skills_repo: Path | None,
     output: Path | None,
 ):
-    """Evaluate skill activation accuracy.
+    """[DEPRECATED] Quiz-style skill activation eval.
 
-    Tests whether the model correctly selects the right skill(s)
-    for given .NET development tasks.
+    Directly asks the model to select skills — not realistic.
+    Use eval-activation instead for realistic discovery testing.
     """
-    from .eval_activation.runner import run_activation_eval
+    from .eval_activation_quiz.runner import run_activation_eval
     from .reporting.results import print_activation_results, export_results_json
 
-    console.print(f"[bold]Running activation eval[/bold] (model={model}, index={with_index})")
+    console.print("[yellow]WARNING: This is the deprecated quiz-style eval.[/yellow]")
+    console.print("[yellow]Use eval-activation for realistic discovery testing.[/yellow]\n")
+    console.print(f"[bold]Running activation quiz[/bold] (model={model}, index={with_index})")
     console.print(f"Dataset: {dataset}")
 
     results = run_activation_eval(
@@ -96,7 +171,7 @@ def eval_activation(
 
     # Always save results to a file
     out = output or _auto_output_path(
-        "activation", model, index="yes" if with_index else "no"
+        "activation-quiz", model, index="yes" if with_index else "no"
     )
     export_results_json(
         activation_results=results,

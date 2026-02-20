@@ -8,7 +8,8 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
-from ..eval_activation.metrics import ActivationResults
+from ..eval_activation_quiz.metrics import ActivationResults
+from ..eval_activation.metrics import ActivationResults as ActivationV2Results
 from ..eval_effectiveness.metrics import EffectivenessResults
 
 
@@ -201,6 +202,122 @@ def export_results_json(
                     "reasoning": r.reasoning,
                 }
                 for r in effectiveness_results.results
+            ],
+        }
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+    console.print(f"\nResults exported to [bold]{output_path}[/bold]")
+
+
+# --- V2 Activation Reporting (realistic eval) ---
+
+
+def print_activation_v2_results(
+    results_by_mechanism: dict[str, ActivationV2Results],
+) -> None:
+    """Print realistic activation eval results with mechanism comparison."""
+    console.print("\n[bold]Skill Activation Evaluation Results[/bold]\n")
+
+    # Mechanism comparison table
+    comparison = Table(title="Mechanism Comparison")
+    comparison.add_column("Metric", style="cyan")
+    for mech_name in results_by_mechanism:
+        comparison.add_column(mech_name, style="green")
+
+    metrics = [
+        ("Total Cases", lambda r: str(r.total_cases)),
+        ("Activation Rate", lambda r: f"{r.activation_rate:.1%}"),
+        ("True Positive Rate", lambda r: f"{r.true_positive_rate:.1%}"),
+        ("False Positive Rate", lambda r: f"{r.false_positive_rate:.1%}"),
+        ("Accuracy (when activated)", lambda r: f"{r.accuracy_when_activated:.1%}"),
+        ("Mean Prompt Tokens", lambda r: f"{r.mean_prompt_tokens:,.0f}"),
+        ("Mean Completion Tokens", lambda r: f"{r.mean_completion_tokens:,.0f}"),
+        ("Mean Total Tokens", lambda r: f"{r.mean_total_tokens:,.0f}"),
+    ]
+
+    for label, fn in metrics:
+        row = [label]
+        for results in results_by_mechanism.values():
+            row.append(fn(results))
+        comparison.add_row(*row)
+
+    console.print(comparison)
+
+    # Per-case detail for each mechanism
+    for mech_name, results in results_by_mechanism.items():
+        console.print(f"\n[bold]Per-Case: {mech_name}[/bold]")
+        detail = Table()
+        detail.add_column("ID", style="dim")
+        detail.add_column("Should Act?", style="dim")
+        detail.add_column("Activated?", style="bold")
+        detail.add_column("Skills", style="cyan")
+        detail.add_column("Accuracy", style="green")
+        detail.add_column("Tokens", style="yellow", justify="right")
+
+        for r in results.results:
+            should = "[green]yes[/green]" if r.should_activate else "[dim]no[/dim]"
+            activated = (
+                "[green]yes[/green]" if r.activated else "[dim]no[/dim]"
+            )
+            # Color accuracy
+            if r.accuracy == 1.0:
+                acc_str = "[green]1.0[/green]"
+            elif r.accuracy == 0.5:
+                acc_str = "[yellow]0.5[/yellow]"
+            else:
+                acc_str = "[red]0.0[/red]" if r.should_activate else "[dim]—[/dim]"
+
+            detail.add_row(
+                r.case_id,
+                should,
+                activated,
+                ", ".join(r.activated_skills) or "—",
+                acc_str,
+                f"{r.total_tokens:,}",
+            )
+
+        console.print(detail)
+
+
+def export_activation_v2_json(
+    results_by_mechanism: dict[str, ActivationV2Results],
+    output_path: Path,
+) -> None:
+    """Export v2 activation results to JSON."""
+    data = {}
+
+    for mech_name, results in results_by_mechanism.items():
+        data[mech_name] = {
+            "summary": {
+                "total_cases": results.total_cases,
+                "positive_cases": results.positive_cases,
+                "negative_cases": results.negative_cases,
+                "activation_rate": results.activation_rate,
+                "true_positive_rate": results.true_positive_rate,
+                "false_positive_rate": results.false_positive_rate,
+                "accuracy_when_activated": results.accuracy_when_activated,
+                "total_prompt_tokens": results.total_prompt_tokens,
+                "total_completion_tokens": results.total_completion_tokens,
+                "mean_prompt_tokens": results.mean_prompt_tokens,
+                "mean_completion_tokens": results.mean_completion_tokens,
+                "mean_total_tokens": results.mean_total_tokens,
+            },
+            "cases": [
+                {
+                    "id": r.case_id,
+                    "should_activate": r.should_activate,
+                    "activated": r.activated,
+                    "activated_skills": r.activated_skills,
+                    "expected_skills": r.expected_skills,
+                    "accuracy": r.accuracy,
+                    "prompt_tokens": r.prompt_tokens,
+                    "completion_tokens": r.completion_tokens,
+                    "total_tokens": r.total_tokens,
+                }
+                for r in results.results
             ],
         }
 
