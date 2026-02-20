@@ -2,12 +2,29 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import click
 from rich.console import Console
 
 console = Console()
+
+RESULTS_DIR = Path(__file__).parent.parent.parent / "results"
+
+
+def _auto_output_path(eval_type: str, model: str, **extras: str) -> Path:
+    """Generate an automatic output path for eval results.
+
+    Always saves to results/<eval_type>/<timestamp>_<model>[_<extras>].json
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    parts = [timestamp, model]
+    for k, v in extras.items():
+        if v:
+            parts.append(f"{k}-{v}")
+    filename = "_".join(parts) + ".json"
+    return RESULTS_DIR / eval_type / filename
 
 
 @click.group()
@@ -77,12 +94,15 @@ def eval_activation(
 
     print_activation_results(results)
 
-    if output:
-        export_results_json(
-            activation_results=results,
-            effectiveness_results=None,
-            output_path=output,
-        )
+    # Always save results to a file
+    out = output or _auto_output_path(
+        "activation", model, index="yes" if with_index else "no"
+    )
+    export_results_json(
+        activation_results=results,
+        effectiveness_results=None,
+        output_path=out,
+    )
 
 
 @cli.command()
@@ -152,12 +172,15 @@ def eval_effectiveness(
 
     print_effectiveness_results(results)
 
-    if output:
-        export_results_json(
-            activation_results=None,
-            effectiveness_results=results,
-            output_path=output,
-        )
+    # Always save results to a file
+    out = output or _auto_output_path(
+        "effectiveness", model, skill=skill_filter or "all"
+    )
+    export_results_json(
+        activation_results=None,
+        effectiveness_results=results,
+        output_path=out,
+    )
 
 
 @cli.command()
@@ -280,12 +303,32 @@ def eval_size(
 
     console.print(comparison)
 
-    if output:
-        export_results_json(
-            activation_results=None,
-            effectiveness_results=full_results,
-            output_path=output,
-        )
+    # Always save results to a file
+    out = output or _auto_output_path(
+        "size-impact", model, skill=skill_name, lines=str(max_lines)
+    )
+    import json as _json
+    out.parent.mkdir(parents=True, exist_ok=True)
+    size_data = {
+        "skill": skill_name,
+        "max_lines": max_lines,
+        "model": model,
+        "full": {
+            "win_rate": full_results.win_rate,
+            "mean_enhanced_score": full_results.mean_enhanced_score,
+            "mean_improvement": full_results.mean_improvement,
+            "total_cases": full_results.total_cases,
+        },
+        "truncated": {
+            "win_rate": truncated_results.win_rate,
+            "mean_enhanced_score": truncated_results.mean_enhanced_score,
+            "mean_improvement": truncated_results.mean_improvement,
+            "total_cases": truncated_results.total_cases,
+        },
+    }
+    with open(out, "w", encoding="utf-8") as f:
+        _json.dump(size_data, f, indent=2)
+    console.print(f"\nResults exported to [bold]{out}[/bold]")
 
 
 @cli.command()
@@ -419,29 +462,30 @@ def eval_variants(
 
     console.print(comparison)
 
-    if output:
-        import json
-        output.parent.mkdir(parents=True, exist_ok=True)
-        data = {}
-        for strategy, results in results_by_strategy.items():
-            data[strategy] = {
-                "win_rate": results.win_rate,
-                "mean_enhanced_score": results.mean_enhanced_score,
-                "mean_improvement": results.mean_improvement,
-                "cases": [
-                    {
-                        "id": r.case_id,
-                        "baseline_score": r.baseline_score,
-                        "enhanced_score": r.enhanced_score,
-                        "winner": r.winner,
-                        "reasoning": r.reasoning,
-                    }
-                    for r in results.results
-                ],
-            }
-        with open(output, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        console.print(f"\nResults exported to [bold]{output}[/bold]")
+    # Always save results to a file
+    out = output or _auto_output_path("variants", model, skill=skill_name)
+    import json
+    out.parent.mkdir(parents=True, exist_ok=True)
+    data = {}
+    for strategy, results in results_by_strategy.items():
+        data[strategy] = {
+            "win_rate": results.win_rate,
+            "mean_enhanced_score": results.mean_enhanced_score,
+            "mean_improvement": results.mean_improvement,
+            "cases": [
+                {
+                    "id": r.case_id,
+                    "baseline_score": r.baseline_score,
+                    "enhanced_score": r.enhanced_score,
+                    "winner": r.winner,
+                    "reasoning": r.reasoning,
+                }
+                for r in results.results
+            ],
+        }
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    console.print(f"\nResults exported to [bold]{out}[/bold]")
 
 
 @cli.command()

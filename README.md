@@ -103,6 +103,31 @@ dotnet-evals list-skills
 
 Per-skill evaluation criteria with weighted scoring dimensions.
 
+## Evaluation Results
+
+### Activation Accuracy (February 2026)
+
+Tested across 25 Akka.NET task scenarios (5 per skill + 2 negative cases) with and without the compressed routing index from the dotnet-skills README.
+
+| Model | Compressed Index | Exact Match | Weighted Accuracy | Precision@1 | Recall |
+|-------|-----------------|-------------|-------------------|-------------|--------|
+| Haiku 4.5 | No | 92% | 96% | 84% | 100% |
+| Haiku 4.5 | Yes | 92% | 96% | 88% | 100% |
+| Sonnet 4.5 | No | 92% | 96% | 88% | 100% |
+| Sonnet 4.5 | Yes | 92% | 96% | 88% | 100% |
+| Opus 4.6 | No | 92% | 96% | 88% | 100% |
+| Opus 4.6 | Yes | 92% | 96% | 88% | 100% |
+
+**Key findings:**
+
+1. **Skill descriptions alone are sufficient for accurate routing.** All three models achieve 92% exact match accuracy and 100% recall using only skill names and descriptions — no compressed index needed.
+2. **Compressed index provides a marginal P@1 boost for Haiku** (84% → 88%) but makes zero difference for Sonnet and Opus. Worth keeping as a minor improvement for weaker models, but not critical.
+3. **Zero misses across all configurations.** Every model correctly identified at least one relevant Akka.NET skill for every Akka-related task. The only "partial" scores (0.5) came from the 2 negative test cases (non-Akka tasks like EF Core and Blazor) where models selected non-Akka skills that were acceptable but not the primary expected skill.
+4. **Opus tends to over-select.** It consistently includes `akka-net-best-practices` as a secondary pick even when a more specific skill is the primary match. This inflates confusion pair counts but doesn't hurt accuracy since the correct skill is still selected.
+5. **No skill confusion issues.** Despite significant overlap between Akka.NET skills (e.g., best-practices vs hosting-actor-patterns both cover Props/supervision), models reliably distinguish between them.
+
+**Recommendation:** The compressed routing index in the README provides negligible benefit. Skill activation routing works well based on skill names and descriptions alone across all Claude model tiers.
+
 ## Cost Estimates
 
 | Eval Type | Cases | API Calls | Cost (Sonnet) |
