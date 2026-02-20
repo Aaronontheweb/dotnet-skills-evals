@@ -31,10 +31,41 @@ The initial evaluation targets the 5 Akka.NET skills, which are the most critica
 
 ## Architecture
 
-This harness connects **directly to the Anthropic API via DSPy** - Claude Code cannot invoke or test itself programmatically. We simulate Claude Code's skill activation by:
-1. Building a system prompt containing all skill names + descriptions (how Claude Code discovers skills)
-2. Passing the user's task and asking the model to select skills
-3. For effectiveness testing, injecting full SKILL.md content as context
+This harness connects to Claude models via **OpenRouter + LiteLLM** for raw API calls. Claude Code cannot invoke or test itself programmatically. We simulate skill discovery by testing three mechanisms:
+
+1. **Tool-based** (`tool`) — model gets a `Skill` tool listing all skill names + descriptions (mirrors Claude Code's plugin system)
+2. **Compressed index** (`compressed`) — the terse Vercel-style routing snippet (~15 lines) injected into the system prompt
+3. **Fat index** (`fat`) — all 31 skill names + full descriptions injected into the system prompt
+
+All mechanisms share the same neutral system prompt with no mention of skills or evaluation. Test prompts are goal-oriented developer conversations with C# code snippets — not quiz-style questions about skills.
+
+For effectiveness testing, full SKILL.md content is injected as context.
+
+## Activation Eval Results (Haiku, 31 cases)
+
+Full run: 23 Akka.NET positive cases + 8 non-Akka negative cases.
+
+| Metric | tool | compressed | fat |
+|--------|------|-----------|-----|
+| Activation Rate | 100% | 45.2% | 16.1% |
+| True Positive Rate | 100% | 56.5% | 13.0% |
+| False Positive Rate | 100% | 12.5% | 25.0% |
+| Accuracy (when activated) | 95.7% | 46.2% | 33.3% |
+| Mean Prompt Tokens | 16,513 | 688 | 1,956 |
+| Mean Completion Tokens | 2,372 | 2,315 | 2,262 |
+| Mean Total Tokens | 18,885 | 3,002 | 4,217 |
+
+### Key Learnings
+
+1. **Tool mechanism is not useful for activation eval.** When given a `Skill` tool, the model uses it 100% of the time — including on all 8 negative cases (100% FPR). This measures tool-calling bias, not skill discovery quality. The tool mechanism still works well in production (Claude Code's actual plugin system), but it's useless as an eval signal.
+
+2. **Compressed index vastly outperforms fat index.** Despite having ~3x fewer tokens (688 vs 1,956 prompt tokens), compressed achieves 56.5% TPR vs 13.0% for fat. The fat index's wall of text paradoxically makes the model *less* likely to reference skills — information overload suppresses activation.
+
+3. **Compressed has good negative discrimination.** 87.5% true negative rate (only 1 false positive out of 8 negatives). The fat index is worse at 75% true negative rate.
+
+4. **"serialization" false positive in detection.** The skill name `serialization` is short enough that it gets substring-matched when models discuss serialization *concepts* in their responses. Need to filter short/generic skill names or require citation format.
+
+5. **Compressed index accuracy needs work.** When activated, only 46.2% pick the *right* skill. The model often activates related-but-wrong Akka skills (e.g., picks `akka-net-aspire-configuration` when `akka-net-management` was expected). Skill descriptions may need better differentiation.
 
 ## Setup
 
@@ -48,7 +79,7 @@ uv sync
 
 # Configure API key
 cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY
+# Edit .env and add your OPENROUTER_API_KEY
 
 # Ensure dotnet-skills repo is available locally
 # Default path: ~/repositories/dotnet-skills
@@ -57,8 +88,12 @@ cp .env.example .env
 ## Usage
 
 ```bash
-# Skill activation accuracy (which skill gets selected?)
+# Realistic skill activation eval (all 3 discovery mechanisms)
 dotnet-evals eval-activation --model haiku --dataset datasets/activation/akka_test_cases.jsonl
+
+# Run specific mechanism(s)
+dotnet-evals eval-activation --model sonnet --mechanism compressed --mechanism fat \
+    --dataset datasets/activation/akka_test_cases.jsonl
 
 # Skill effectiveness (does the skill improve output quality?)
 dotnet-evals eval-effectiveness --model sonnet --skill akka-net-best-practices
@@ -78,13 +113,16 @@ dotnet-evals list-skills
 
 ### Activation test cases (`datasets/activation/*.jsonl`)
 
+Test cases use goal-oriented developer prompts with C# code snippets (not documentation-style questions):
+
 ```json
 {
   "id": "act-001",
-  "user_prompt": "My Akka.NET actors need to communicate across cluster nodes",
+  "user_prompt": "I have a notification system where actors publish events... [includes code snippet]",
   "expected_skills": ["akka-net-best-practices"],
   "acceptable_skills": [],
-  "category": "akka-pubsub"
+  "should_activate": true,
+  "category": "best-practices-pubsub"
 }
 ```
 
@@ -103,11 +141,20 @@ dotnet-evals list-skills
 
 Per-skill evaluation criteria with weighted scoring dimensions.
 
+## Future Work
+
+- **Run on Sonnet and Opus** — Haiku results establish baseline; need to see if larger models activate more reliably with the same compressed index
+- **Fix "serialization" false positive** — filter short/generic skill names from substring detection, or require explicit citation format (e.g., `[skill:serialization]`)
+- **Improve skill description differentiation** — compressed accuracy of 46.2% suggests Akka skill descriptions overlap too much; need clearer boundaries between `akka-net-management`, `akka-net-aspire-configuration`, and `akka-net-best-practices`
+- **Effectiveness evals** — measure whether skills actually improve code quality vs. baseline (no skill injected)
+- **Size impact evals** — test full SKILL.md vs truncated-to-500-lines to determine if oversized skills hurt or help
+- **Variant comparison** — test original vs condensed authoring strategies for oversized skills
+
 ## Cost Estimates
 
 | Eval Type | Cases | API Calls | Cost (Sonnet) |
 |-----------|-------|-----------|---------------|
-| Activation | ~25 | 25 | ~$0.50 |
+| Activation | ~31 | 31 | ~$0.50 |
 | Effectiveness | ~20 | 60 | ~$3-5 |
 | Size impact | ~10 | 60 | ~$3-5 |
 | **Total MVP** | | | **~$10-15** |

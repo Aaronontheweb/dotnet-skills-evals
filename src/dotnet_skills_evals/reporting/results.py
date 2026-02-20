@@ -8,70 +8,11 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
-from ..eval_activation_quiz.metrics import ActivationResults
 from ..eval_activation.metrics import ActivationResults as ActivationV2Results
 from ..eval_effectiveness.metrics import EffectivenessResults
 
 
 console = Console()
-
-
-def print_activation_results(results: ActivationResults) -> None:
-    """Print activation evaluation results to console."""
-    console.print("\n[bold]Skill Activation Evaluation Results[/bold]\n")
-
-    # Summary table
-    summary = Table(title="Summary")
-    summary.add_column("Metric", style="cyan")
-    summary.add_column("Value", style="green")
-
-    summary.add_row("Total Cases", str(results.total_cases))
-    summary.add_row("Exact Matches", str(results.exact_matches))
-    summary.add_row("Acceptable Matches", str(results.acceptable_matches))
-    summary.add_row("Misses", str(results.misses))
-    summary.add_row("Accuracy (weighted)", f"{results.accuracy:.1%}")
-    summary.add_row("Exact Accuracy", f"{results.exact_accuracy:.1%}")
-    summary.add_row("Mean Precision@1", f"{results.mean_precision_at_1:.1%}")
-    summary.add_row("Mean Recall", f"{results.mean_recall:.1%}")
-    console.print(summary)
-
-    # Confusion matrix (top confusions)
-    confusions = results.top_confusions(10)
-    if confusions:
-        console.print("\n[bold]Top Confusion Pairs[/bold]")
-        confusion_table = Table()
-        confusion_table.add_column("Expected", style="cyan")
-        confusion_table.add_column("Predicted Instead", style="red")
-        confusion_table.add_column("Count", style="yellow")
-
-        for expected, predicted, count in confusions:
-            confusion_table.add_row(expected, predicted, str(count))
-        console.print(confusion_table)
-
-    # Per-case details
-    console.print("\n[bold]Per-Case Results[/bold]")
-    detail_table = Table()
-    detail_table.add_column("ID", style="dim")
-    detail_table.add_column("Accuracy", style="green")
-    detail_table.add_column("Expected", style="cyan")
-    detail_table.add_column("Predicted", style="yellow")
-
-    for case in results.per_case_results:
-        acc = case["accuracy"]
-        acc_str = (
-            "[green]1.0[/green]"
-            if acc == 1.0
-            else "[yellow]0.5[/yellow]"
-            if acc == 0.5
-            else "[red]0.0[/red]"
-        )
-        detail_table.add_row(
-            case["id"],
-            acc_str,
-            ", ".join(case["expected"]),
-            ", ".join(case["predicted"]) or "(none)",
-        )
-    console.print(detail_table)
 
 
 def print_effectiveness_results(results: EffectivenessResults) -> None:
@@ -151,44 +92,22 @@ def print_effectiveness_results(results: EffectivenessResults) -> None:
     console.print(detail_table)
 
 
-def export_results_json(
-    activation_results: ActivationResults | None,
-    effectiveness_results: EffectivenessResults | None,
+def export_effectiveness_json(
+    results: EffectivenessResults,
     output_path: Path,
 ) -> None:
-    """Export results to a JSON file."""
-    data: dict = {}
-
-    if activation_results:
-        data["activation"] = {
+    """Export effectiveness results to a JSON file."""
+    data = {
+        "effectiveness": {
             "summary": {
-                "total_cases": activation_results.total_cases,
-                "exact_matches": activation_results.exact_matches,
-                "acceptable_matches": activation_results.acceptable_matches,
-                "misses": activation_results.misses,
-                "accuracy": activation_results.accuracy,
-                "exact_accuracy": activation_results.exact_accuracy,
-                "mean_precision_at_1": activation_results.mean_precision_at_1,
-                "mean_recall": activation_results.mean_recall,
-            },
-            "confusions": [
-                {"expected": e, "predicted": p, "count": c}
-                for e, p, c in activation_results.top_confusions(20)
-            ],
-            "cases": activation_results.per_case_results,
-        }
-
-    if effectiveness_results:
-        data["effectiveness"] = {
-            "summary": {
-                "total_cases": effectiveness_results.total_cases,
-                "skill_wins": effectiveness_results.skill_wins,
-                "baseline_wins": effectiveness_results.baseline_wins,
-                "ties": effectiveness_results.ties,
-                "win_rate": effectiveness_results.win_rate,
-                "mean_baseline_score": effectiveness_results.mean_baseline_score,
-                "mean_enhanced_score": effectiveness_results.mean_enhanced_score,
-                "mean_improvement": effectiveness_results.mean_improvement,
+                "total_cases": results.total_cases,
+                "skill_wins": results.skill_wins,
+                "baseline_wins": results.baseline_wins,
+                "ties": results.ties,
+                "win_rate": results.win_rate,
+                "mean_baseline_score": results.mean_baseline_score,
+                "mean_enhanced_score": results.mean_enhanced_score,
+                "mean_improvement": results.mean_improvement,
             },
             "cases": [
                 {
@@ -201,9 +120,10 @@ def export_results_json(
                     "winner": r.winner,
                     "reasoning": r.reasoning,
                 }
-                for r in effectiveness_results.results
+                for r in results.results
             ],
         }
+    }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:

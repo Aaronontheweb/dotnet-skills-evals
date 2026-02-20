@@ -110,76 +110,6 @@ def eval_activation(
     export_activation_v2_json(results_by_mechanism, out)
 
 
-@cli.command("eval-activation-quiz")
-@click.option(
-    "--model",
-    type=click.Choice(["haiku", "sonnet", "opus"]),
-    default="haiku",
-    help="Model to use for evaluation.",
-)
-@click.option(
-    "--with-index/--without-index",
-    default=False,
-    help="Include the compressed routing index in the prompt.",
-)
-@click.option(
-    "--dataset",
-    type=click.Path(exists=True, path_type=Path),
-    required=True,
-    help="Path to JSONL dataset file.",
-)
-@click.option(
-    "--skills-repo",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="Path to dotnet-skills repository.",
-)
-@click.option(
-    "--output",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Path to write JSON results file.",
-)
-def eval_activation_quiz(
-    model: str,
-    with_index: bool,
-    dataset: Path,
-    skills_repo: Path | None,
-    output: Path | None,
-):
-    """[DEPRECATED] Quiz-style skill activation eval.
-
-    Directly asks the model to select skills — not realistic.
-    Use eval-activation instead for realistic discovery testing.
-    """
-    from .eval_activation_quiz.runner import run_activation_eval
-    from .reporting.results import print_activation_results, export_results_json
-
-    console.print("[yellow]WARNING: This is the deprecated quiz-style eval.[/yellow]")
-    console.print("[yellow]Use eval-activation for realistic discovery testing.[/yellow]\n")
-    console.print(f"[bold]Running activation quiz[/bold] (model={model}, index={with_index})")
-    console.print(f"Dataset: {dataset}")
-
-    results = run_activation_eval(
-        model=model,
-        dataset_path=dataset,
-        with_index=with_index,
-        skills_repo=skills_repo,
-    )
-
-    print_activation_results(results)
-
-    # Always save results to a file
-    out = output or _auto_output_path(
-        "activation-quiz", model, index="yes" if with_index else "no"
-    )
-    export_results_json(
-        activation_results=results,
-        effectiveness_results=None,
-        output_path=out,
-    )
-
-
 @cli.command()
 @click.option(
     "--model",
@@ -230,7 +160,7 @@ def eval_effectiveness(
     Compares code quality WITH a skill vs WITHOUT it using an LLM-as-judge.
     """
     from .eval_effectiveness.runner import run_effectiveness_eval
-    from .reporting.results import print_effectiveness_results, export_results_json
+    from .reporting.results import print_effectiveness_results, export_effectiveness_json
 
     console.print(f"[bold]Running effectiveness eval[/bold] (model={model})")
     if skill_filter:
@@ -251,11 +181,7 @@ def eval_effectiveness(
     out = output or _auto_output_path(
         "effectiveness", model, skill=skill_filter or "all"
     )
-    export_results_json(
-        activation_results=None,
-        effectiveness_results=results,
-        output_path=out,
-    )
+    export_effectiveness_json(results, out)
 
 
 @cli.command()
@@ -316,7 +242,7 @@ def eval_size(
     once truncated to --max-lines. Compares the results.
     """
     from .eval_effectiveness.runner import run_effectiveness_eval
-    from .reporting.results import print_effectiveness_results, export_results_json
+    from .reporting.results import print_effectiveness_results
 
     console.print(f"[bold]Running size impact eval[/bold] (model={model}, skill={skill_name})")
     console.print(f"Comparing: full content vs truncated to {max_lines} lines")
