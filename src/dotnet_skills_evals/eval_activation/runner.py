@@ -10,6 +10,7 @@ from rich.console import Console
 from ..config import (
     DEFAULT_SKILLS_REPO,
     OPENROUTER_API_KEY,
+    ensure_skills_repo,
     get_model_id,
 )
 from ..skills.catalog import build_skill_catalog, build_compressed_index
@@ -86,7 +87,7 @@ def run_activation_eval(
     if mechanism_names is None:
         mechanism_names = ["tool", "compressed", "fat"]
 
-    repo = skills_repo or DEFAULT_SKILLS_REPO
+    repo = ensure_skills_repo(skills_repo)
     model_id = get_model_id(model)
     api_key = OPENROUTER_API_KEY
     api_base = "https://openrouter.ai/api/v1"

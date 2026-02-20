@@ -335,10 +335,11 @@ def eval_size(
 @cli.command()
 def list_skills():
     """List all skills from the dotnet-skills repository with sizes."""
-    from .config import DEFAULT_SKILLS_REPO
+    from .config import ensure_skills_repo
     from .skills.loader import load_all_skills
 
-    skills = load_all_skills(DEFAULT_SKILLS_REPO / "skills")
+    repo = ensure_skills_repo()
+    skills = load_all_skills(repo / "skills")
 
     from rich.table import Table
 
@@ -512,7 +513,7 @@ def scaffold_variants(
     SKILL.md files for you to fill in.
     """
     from .skills.variants import scaffold_variant_dirs
-    from .config import DEFAULT_SKILLS_REPO
+    from .config import ensure_skills_repo
     from .skills.loader import load_all_skills, filter_skills_by_prefix
 
     default_variants = Path(__file__).parent.parent.parent / "datasets" / "variants"
@@ -520,7 +521,8 @@ def scaffold_variants(
 
     if not skill_names:
         # Default to Akka skills
-        skills = load_all_skills(DEFAULT_SKILLS_REPO / "skills")
+        repo = ensure_skills_repo()
+        skills = load_all_skills(repo / "skills")
         akka_skills = filter_skills_by_prefix(skills, "akka")
         names = [s.metadata.name for s in akka_skills]
     else:
