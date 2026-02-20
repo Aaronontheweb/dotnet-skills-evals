@@ -41,31 +41,47 @@ All mechanisms share the same neutral system prompt with no mention of skills or
 
 For effectiveness testing, full SKILL.md content is injected as context.
 
-## Activation Eval Results (Haiku, 31 cases)
+## Activation Eval Results (31 cases, compressed vs fat)
 
-Full run: 23 Akka.NET positive cases + 8 non-Akka negative cases.
+Full run: 23 Akka.NET positive cases + 8 non-Akka negative cases. The tool mechanism was dropped from comparison — it has 100% activation rate (including 100% FPR on negatives), which measures tool-calling bias rather than skill discovery quality.
 
-| Metric | tool | compressed | fat |
-|--------|------|-----------|-----|
-| Activation Rate | 100% | 45.2% | 16.1% |
-| True Positive Rate | 100% | 56.5% | 13.0% |
-| False Positive Rate | 100% | 12.5% | 25.0% |
-| Accuracy (when activated) | 95.7% | 46.2% | 33.3% |
-| Mean Prompt Tokens | 16,513 | 688 | 1,956 |
-| Mean Completion Tokens | 2,372 | 2,315 | 2,262 |
-| Mean Total Tokens | 18,885 | 3,002 | 4,217 |
+### Compressed Index
+
+| Metric | Haiku | Sonnet | Opus |
+|--------|-------|--------|------|
+| Activation Rate | 45.2% | 41.9% | 16.1% |
+| True Positive Rate | 56.5% | 56.5% | 17.4% |
+| False Positive Rate | 12.5% | **0.0%** | 12.5% |
+| Accuracy (when activated) | 46.2% | **84.6%** | 0.0% |
+| Mean Prompt Tokens | 688 | 688 | 689 |
+| Mean Completion Tokens | 2,315 | 2,337 | 2,770 |
+| Mean Total Tokens | 3,002 | 3,025 | 3,459 |
+
+### Fat Index
+
+| Metric | Haiku | Sonnet | Opus |
+|--------|-------|--------|------|
+| Activation Rate | 16.1% | 19.4% | 12.9% |
+| True Positive Rate | 13.0% | 21.7% | 13.0% |
+| False Positive Rate | 25.0% | 12.5% | 12.5% |
+| Accuracy (when activated) | 33.3% | 60.0% | 0.0% |
+| Mean Prompt Tokens | 1,956 | 1,956 | 1,957 |
+| Mean Completion Tokens | 2,262 | 2,123 | 2,643 |
+| Mean Total Tokens | 4,217 | 4,078 | 4,600 |
 
 ### Key Learnings
 
-1. **Tool mechanism is not useful for activation eval.** When given a `Skill` tool, the model uses it 100% of the time — including on all 8 negative cases (100% FPR). This measures tool-calling bias, not skill discovery quality. The tool mechanism still works well in production (Claude Code's actual plugin system), but it's useless as an eval signal.
+1. **Sonnet + compressed index is the clear winner.** 56.5% TPR, 0% FPR, 84.6% accuracy when activated — best activation rate, best precision, zero false positives, all at the lowest token cost (~3K tokens/case).
 
-2. **Compressed index vastly outperforms fat index.** Despite having ~3x fewer tokens (688 vs 1,956 prompt tokens), compressed achieves 56.5% TPR vs 13.0% for fat. The fat index's wall of text paradoxically makes the model *less* likely to reference skills — information overload suppresses activation.
+2. **Compressed index outperforms fat index across all models.** Despite having ~3x fewer tokens (688 vs 1,956 prompt tokens), compressed achieves higher TPR and better accuracy on every model. The fat index's wall of text paradoxically makes models *less* likely to reference skills — information overload suppresses activation.
 
-3. **Compressed has good negative discrimination.** 87.5% true negative rate (only 1 false positive out of 8 negatives). The fat index is worse at 75% true negative rate.
+3. **Opus essentially doesn't activate from index-based discovery.** Every single "activation" across both mechanisms was a "serialization" substring false positive — 0% real accuracy. Opus treats the skill index as informational context but never cites specific skill names in responses. This is a detection methodology issue, not necessarily a model quality issue — Opus may be incorporating the knowledge without naming the skill.
 
-4. **"serialization" false positive in detection.** The skill name `serialization` is short enough that it gets substring-matched when models discuss serialization *concepts* in their responses. Need to filter short/generic skill names or require citation format.
+4. **Haiku and Sonnet have identical TPR (56.5%) on compressed**, but Sonnet is far more accurate when it activates (84.6% vs 46.2%). Haiku often activates related-but-wrong Akka skills.
 
-5. **Compressed index accuracy needs work.** When activated, only 46.2% pick the *right* skill. The model often activates related-but-wrong Akka skills (e.g., picks `akka-net-aspire-configuration` when `akka-net-management` was expected). Skill descriptions may need better differentiation.
+5. **"serialization" false positive in detection.** The skill name `serialization` is short enough that it gets substring-matched when models discuss serialization *concepts* in their responses. This is the only "activation" Opus shows. Need to filter short/generic skill names or require citation format.
+
+6. **Sonnet compressed has perfect negative discrimination.** 0% FPR — never activated on any of the 8 non-Akka negative cases. Haiku and Opus both have 12.5% FPR on compressed (1 false positive each, both "serialization").
 
 ## Setup
 
@@ -143,9 +159,9 @@ Per-skill evaluation criteria with weighted scoring dimensions.
 
 ## Future Work
 
-- **Run on Sonnet and Opus** — Haiku results establish baseline; need to see if larger models activate more reliably with the same compressed index
 - **Fix "serialization" false positive** — filter short/generic skill names from substring detection, or require explicit citation format (e.g., `[skill:serialization]`)
-- **Improve skill description differentiation** — compressed accuracy of 46.2% suggests Akka skill descriptions overlap too much; need clearer boundaries between `akka-net-management`, `akka-net-aspire-configuration`, and `akka-net-best-practices`
+- **Investigate Opus detection gap** — Opus may be using skill knowledge without citing names; need alternative detection (semantic similarity, rubric-based judging) to determine if Opus is truly ignoring skills or just not naming them
+- **Improve skill description differentiation** — Haiku's compressed accuracy of 46.2% suggests Akka skill descriptions overlap too much; need clearer boundaries between `akka-net-management`, `akka-net-aspire-configuration`, and `akka-net-best-practices`
 - **Effectiveness evals** — measure whether skills actually improve code quality vs. baseline (no skill injected)
 - **Size impact evals** — test full SKILL.md vs truncated-to-500-lines to determine if oversized skills hurt or help
 - **Variant comparison** — test original vs condensed authoring strategies for oversized skills
