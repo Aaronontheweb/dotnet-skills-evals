@@ -1,0 +1,33 @@
+skill_name: akka-net-management
+criteria:
+  - name: service_discovery
+    weight: 0.30
+    description: >
+      Configures dynamic service discovery (Kubernetes, Azure, or config-based)
+      instead of static seed nodes. Uses Akka.Discovery with appropriate provider.
+
+  - name: cluster_bootstrap
+    weight: 0.25
+    description: >
+      Configures Akka.Cluster.Bootstrap for automatic cluster formation.
+      Includes contact-point-discovery settings with appropriate timeouts
+      and required-contact-point-nr.
+
+  - name: health_endpoints
+    weight: 0.25
+    description: >
+      Sets up Akka.Management HTTP endpoints for health checks. Includes
+      both liveness and readiness probes appropriate for the deployment target
+      (Kubernetes, load balancer).
+
+  - name: nuget_packages
+    weight: 0.10
+    description: >
+      References the correct NuGet packages for the chosen service discovery
+      provider (Akka.Discovery.KubernetesApi, Akka.Discovery.Azure, etc.).
+
+  - name: modern_config
+    weight: 0.10
+    description: >
+      Uses Akka.Hosting configuration methods rather than raw HOCON strings
+      where possible.

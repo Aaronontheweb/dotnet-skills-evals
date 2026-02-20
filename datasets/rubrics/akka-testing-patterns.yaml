@@ -1,0 +1,32 @@
+skill_name: akka-net-testing-patterns
+criteria:
+  - name: test_framework_usage
+    weight: 0.25
+    description: >
+      Uses Akka.Hosting.TestKit for integration tests (not legacy Akka.TestKit
+      unless justified). Sets up tests with proper async lifecycle management
+      using IAsyncLifetime or equivalent.
+
+  - name: testprobe_patterns
+    weight: 0.20
+    description: >
+      Uses TestProbe correctly to verify message sends. Uses ExpectMsg with
+      appropriate timeouts. Avoids flaky patterns like Thread.Sleep or fixed delays.
+
+  - name: persistence_testing
+    weight: 0.20
+    description: >
+      Tests persistent actors with proper event sourcing verification. Tests
+      state recovery after actor restart. Uses in-memory persistence for fast tests.
+
+  - name: dependency_injection
+    weight: 0.20
+    description: >
+      Properly mocks or stubs IServiceProvider dependencies in test fixtures.
+      Uses ServiceCollection to register test doubles.
+
+  - name: test_isolation
+    weight: 0.15
+    description: >
+      Tests are isolated and do not share mutable state. Each test gets a clean
+      actor system or properly scoped test context.
