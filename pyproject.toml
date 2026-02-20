@@ -1,0 +1,36 @@
+[project]
+name = "dotnet-skills-evals"
+version = "0.1.0"
+description = "Evaluation harness for dotnet-skills Claude Code plugin - tests skill activation accuracy and effectiveness"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Aaron Stannard", email = "aaron@petabridge.com"},
+]
+dependencies = [
+    "dspy>=2.6",
+    "click>=8.0",
+    "pyyaml>=6.0",
+    "python-frontmatter>=1.0",
+    "rich>=13.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+dotnet-evals = "dotnet_skills_evals.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dotnet_skills_evals"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

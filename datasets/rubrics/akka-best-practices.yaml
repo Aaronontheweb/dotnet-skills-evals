@@ -1,0 +1,36 @@
+skill_name: akka-net-best-practices
+criteria:
+  - name: pubsub_correctness
+    weight: 0.25
+    description: >
+      Uses DistributedPubSub for cross-node communication, EventStream only for
+      local/single-process scenarios. Never uses EventStream when messages need
+      to reach actors on other cluster nodes.
+
+  - name: supervision_understanding
+    weight: 0.20
+    description: >
+      Supervision strategies are defined on parent actors and apply to their
+      children, not to the actor itself. Uses appropriate directives (Resume for
+      transient errors, Restart for corrupt state, Stop for permanent failures).
+
+  - name: error_handling
+    weight: 0.20
+    description: >
+      Uses try-catch for expected/known failures (HTTP timeouts, invalid input).
+      Lets unexpected exceptions propagate to supervision for restart.
+      Does NOT catch-all with a generic Exception handler that swallows errors.
+
+  - name: props_patterns
+    weight: 0.15
+    description: >
+      Uses Props.Create for simple actors without DI needs. Uses
+      resolver.Props<T>() only when the actor needs IServiceProvider or
+      IRequiredActor<T>. Does not over-use DependencyResolver.
+
+  - name: modern_patterns
+    weight: 0.20
+    description: >
+      Uses Akka.Hosting patterns for actor registration and configuration.
+      Uses ILoggingAdapter (not ILogger<T>) for actor logging.
+      Uses CancellationToken tied to actor lifecycle for async operations.

@@ -1,0 +1,33 @@
+skill_name: akka-net-aspire-configuration
+criteria:
+  - name: aspire_orchestration
+    weight: 0.25
+    description: >
+      Correctly sets up the Aspire AppHost with the Akka.NET service project.
+      Configures resource references (SQL Server, etc.) and passes connection
+      information to the service.
+
+  - name: actor_system_setup
+    weight: 0.25
+    description: >
+      Configures the Akka.NET actor system with Akka.Hosting. Includes
+      clustering, persistence, and management as appropriate. Uses
+      IConfiguration integration for Aspire-provided settings.
+
+  - name: multi_replica
+    weight: 0.20
+    description: >
+      Supports running multiple replicas in the Aspire AppHost for local
+      cluster development. Replicas discover each other and form a cluster.
+
+  - name: persistence_config
+    weight: 0.15
+    description: >
+      Configures Akka.Persistence with Aspire-managed infrastructure
+      (SQL Server connection string from Aspire service bindings).
+
+  - name: management_integration
+    weight: 0.15
+    description: >
+      Integrates Akka.Management for cluster bootstrapping within the
+      Aspire environment. Uses Aspire's service discovery for cluster formation.

@@ -1,0 +1,36 @@
+skill_name: akka-hosting-actor-patterns
+criteria:
+  - name: execution_mode_abstraction
+    weight: 0.30
+    description: >
+      Code works in both local test mode (no cluster) and clustered production
+      mode. Uses GenericChildPerEntityParent for local mode and cluster sharding
+      for production. Same actor code runs in both modes.
+
+  - name: message_extractor
+    weight: 0.20
+    description: >
+      Implements IMessageExtractor correctly for entity routing. Extracts
+      entity ID and unwraps ShardingEnvelope. Works with both
+      GenericChildPerEntityParent and real cluster sharding.
+
+  - name: hosting_registration
+    weight: 0.20
+    description: >
+      Uses Akka.Hosting extension methods (WithActors, WithShardRegion) for
+      actor registration. Uses IRequiredActor<T> for actor lookup instead of
+      hard-coded paths.
+
+  - name: pubsub_abstraction
+    weight: 0.15
+    description: >
+      Abstracts pub/sub behind an interface (IPubSubMediator or similar) with
+      both local and cluster implementations. Application code does not directly
+      reference DistributedPubSub.
+
+  - name: di_integration
+    weight: 0.15
+    description: >
+      Properly integrates with Microsoft.Extensions.DependencyInjection.
+      Uses resolver.Props<T>() when DI is needed. Registers abstractions
+      in IServiceCollection.
