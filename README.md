@@ -97,8 +97,9 @@ uv sync
 cp .env.example .env
 # Edit .env and add your OPENROUTER_API_KEY
 
-# Ensure dotnet-skills repo is available locally
+# The dotnet-skills repo is cloned automatically on first run.
 # Default path: ~/repositories/dotnet-skills
+# Override with: export DOTNET_SKILLS_REPO=/path/to/dotnet-skills
 ```
 
 ## Usage

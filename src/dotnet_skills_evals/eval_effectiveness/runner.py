@@ -11,6 +11,7 @@ import yaml
 
 from ..config import (
     configure_dspy,
+    ensure_skills_repo,
     get_model_id,
     DEFAULT_JUDGE_MODEL,
     DEFAULT_SKILLS_REPO,
@@ -82,7 +83,7 @@ def run_effectiveness_eval(
     subject_predictor = dspy.Predict(DotNetTaskCompletion)
 
     # Load skills
-    repo = skills_repo or DEFAULT_SKILLS_REPO
+    repo = ensure_skills_repo(skills_repo)
     skills = load_all_skills(repo / "skills")
     skill_map = {s.metadata.name: s for s in skills}
 
@@ -291,7 +292,7 @@ def run_variant_comparison(
     subject_predictor = dspy.Predict(DotNetTaskCompletion)
 
     # Load the original skill
-    repo = skills_repo or DEFAULT_SKILLS_REPO
+    repo = ensure_skills_repo(skills_repo)
     skills = load_all_skills(repo / "skills")
     skill_map = {s.metadata.name: s for s in skills}
     skill = skill_map.get(skill_name)
