@@ -64,10 +64,38 @@ class TestSkillLoader:
         for s in akka_skills:
             assert s.metadata.name.startswith("akka")
 
-    def test_oversized_detection(self):
-        """Detects oversized skills (>500 lines)."""
-        skill = load_skill(SKILLS_DIR / "akka-best-practices")
-        assert skill.is_oversized  # 1123 lines
+    def test_oversized_detection(self, tmp_path):
+        """Detects oversized skills (>500 lines) using a synthetic fixture.
+
+        Uses a generated skill instead of a real upstream skill so the test
+        can't silently rot when a skill gets slimmed (akka-best-practices was
+        refactored down to 383 lines by progressive disclosure, dotnet-skills #49).
+        """
+        skill_dir = tmp_path / "synthetic-oversized"
+        skill_dir.mkdir()
+        body = "\n".join(f"line {i}" for i in range(600))
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: synthetic-oversized\ndescription: A skill over the limit.\n---\n\n"
+            + body,
+            encoding="utf-8",
+        )
+        skill = load_skill(skill_dir)
+        assert skill.metadata.line_count > 500
+        assert skill.is_oversized
+
+    def test_not_oversized_under_limit(self, tmp_path):
+        """A skill at or under 500 lines is not flagged."""
+        skill_dir = tmp_path / "synthetic-small"
+        skill_dir.mkdir()
+        body = "\n".join(f"line {i}" for i in range(100))
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: synthetic-small\ndescription: A skill under the limit.\n---\n\n"
+            + body,
+            encoding="utf-8",
+        )
+        skill = load_skill(skill_dir)
+        assert skill.metadata.line_count < 500
+        assert not skill.is_oversized
 
     def test_truncation(self):
         """Can truncate skill content to N lines."""

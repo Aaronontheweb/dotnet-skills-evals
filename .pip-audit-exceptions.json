@@ -1,0 +1,13 @@
+{
+  "$comment": "Documented exceptions for the pip-audit CI gate. Every entry MUST have a reason and a review_by date. The audit script fails the build if an entry is undocumented, if review_by has passed, or if a finding is not covered by an entry here. Do not add to this file to make CI green - fix the dependency, or wait for an upstream fix and set review_by so this comes back on your radar.",
+  "exceptions": [
+    {
+      "id": "PYSEC-2026-2447",
+      "package": "diskcache",
+      "vulnerable_range": "<=5.6.3 (all published versions)",
+      "fixed_in": null,
+      "review_by": "2027-01-15",
+      "reason": "Transitive dependency of dspy (dspy -> diskcache); not directly removable from this project. No fixed release exists as of 2026-10-20 - diskcache 5.6.3 IS the newest publish (2023-08-31) and OSV lists every version as affected, with the advisory unpatched since 2026-07-13. CVSS 4.0 is local-only, low privileges, and requires USER INTERACTION (UI:A): it is unsafe pickle deserialization of a cache directory, so exploitation needs an attacker who can already write to the local cache path. The eval harness does not cache untrusted data, so the practical exposure on this machine is low. Action on review: check whether dspy has dropped or bumped diskcache, or whether upstream has shipped a fix."
+    }
+  ]
+}
