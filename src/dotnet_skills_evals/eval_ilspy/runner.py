@@ -30,7 +30,9 @@ are available; NUGET_PACKAGES points to the package cache. Use /tmp for scratch
 files. The checkout and package cache are read-only. Network retrieval is available
 through the provided research tools; downloaded repositories can be searched with
 the shell. Investigate the requested behavior and provide evidence.
-You may load available skills with invoke_skill when useful.
+Decide if any of the skills in your index might be helpful towards accomplishing your goals.
+The index is in the invoke_skill tool description. To load a helpful skill, call
+invoke_skill with {"skill_name": "<skill name from the index>"}.
 """
 SHELL_TOOL = {"type": "function", "function": {
     "name": "shell", "description": "Run a Bash command in the project investigation container.",

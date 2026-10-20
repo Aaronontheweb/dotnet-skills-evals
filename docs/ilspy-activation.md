@@ -10,6 +10,15 @@ research tools, source, packages, prompt, resource limits, and model settings. T
 advertises the skill through `invoke_skill`; its instructions are loaded only if
 the model requests them. Skill loading is recorded separately from ILSpy use.
 
+The shared system prompt asks agents to consider the index explicitly:
+
+> Decide if any of the skills in your index might be helpful towards accomplishing your goals.
+
+It identifies the `invoke_skill` tool description as the index and shows the
+arguments for loading a helpful skill: `{"skill_name": "<skill name from the index>"}`.
+Both conditions receive this instruction. The completed 54-trial pilot used the
+earlier optional wording, "You may load available skills with invoke_skill when useful."
+
 This uses a controlled LiteLLM/OpenRouter tool loop, rather than a native coding
 assistant's system prompt, permission model, or built-in tools. Conclusions apply
 to this agent environment. There are no API calls to a judge.

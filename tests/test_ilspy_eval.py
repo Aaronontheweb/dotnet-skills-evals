@@ -174,6 +174,10 @@ def test_only_target_skill_availability_differs_between_arms(monkeypatch, tmp_pa
     s, s_calls = trial(monkeypatch, tmp_path, "skill", [response(text="Answer")])
     b_request, s_request = b_calls[0], s_calls[0]
     assert b_request["messages"] == s_request["messages"]
+    system = b_request["messages"][0]["content"]
+    assert "Decide if any of the skills in your index might be helpful towards accomplishing your goals." in system
+    assert '{"skill_name": "<skill name from the index>"}' in system
+    assert "ilspy" not in system.lower()
     assert b_request["tools"][0] == s_request["tools"][0]
     assert b_request["tools"][2:] == s_request["tools"][2:]
     assert b_request["tools"][2] == runner.WEB_SEARCH_TOOL
