@@ -1,0 +1,5 @@
+*
+!Dockerfile
+!packages.lock.json
+!manifest.py
+!ilspy_probe.py

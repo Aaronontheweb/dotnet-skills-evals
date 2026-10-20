@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import subprocess
 
 import click
 from rich.console import Console
@@ -535,3 +536,71 @@ def scaffold_variants(
         console.print(f"  - {vdir / name}/progressive/SKILL.md")
         console.print(f"  - {vdir / name}/progressive/reference.md")
         console.print(f"  - {vdir / name}/progressive/examples.md")
+
+
+@cli.command("prepare-ilspy")
+@click.option("--image", default="dotnet-evals-ilspy:seq-7.0.0", show_default=True)
+def prepare_ilspy(image: str):
+    """Build and check the pinned offline fixture. No API key or model calls."""
+    from .eval_ilspy.sandbox import prepare_fixture
+
+    try:
+        result = prepare_fixture(image)
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    console.print(f"Fixture ready: {result['image']['id']}", markup=False)
+    console.print("Real ILSpy execution and help/listing controls passed. API calls: 0")
+
+
+@cli.command("eval-ilspy")
+@click.option("--model", "models", multiple=True, required=True,
+              help="Repeat for each OpenRouter model ID, e.g. openrouter/<provider>/<model>.")
+@click.option("--dataset", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option("--case", "case_ids", multiple=True, help="Run only these case IDs.")
+@click.option("--repetitions", type=click.IntRange(min=1), default=5, show_default=True)
+@click.option("--skills-repo", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option("--image", default="dotnet-evals-ilspy:seq-7.0.0", show_default=True)
+@click.option("--output", type=click.Path(path_type=Path), default=None)
+@click.option("--seed", type=int, default=42, show_default=True)
+@click.option("--max-steps", type=click.IntRange(min=1), default=30, show_default=True)
+@click.option("--max-completion-tokens", type=click.IntRange(min=1), default=8192, show_default=True)
+@click.option("--max-total-tokens", type=click.IntRange(min=1), default=100000, show_default=True)
+@click.option("--trial-seconds", type=click.IntRange(min=1), default=900, show_default=True)
+@click.option("--command-seconds", type=click.IntRange(min=1), default=60, show_default=True)
+@click.option("--request-seconds", type=click.IntRange(min=1), default=180, show_default=True)
+@click.option("--temperature", type=click.FloatRange(min=0, max=2), default=0.0, show_default=True)
+@click.option("--preflight-only", is_flag=True, help="Check setup and count trials without API calls.")
+def eval_ilspy(models, dataset, case_ids, repetitions, skills_repo, image, output, seed,
+               max_steps, max_completion_tokens, max_total_tokens, trial_seconds,
+               command_seconds, request_seconds, temperature, preflight_only):
+    """Measure actual ILSpy activation uplift with versus without its skill."""
+    from .eval_ilspy.runner import Budget, DATASET, run_eval
+    from rich.table import Table
+
+    try:
+        result = run_eval(
+            models=models, dataset=dataset or DATASET, repetitions=repetitions,
+            skills_repo=skills_repo, image=image, output=output, seed=seed, case_ids=case_ids,
+            budget=Budget(max_steps=max_steps, max_completion_tokens=max_completion_tokens,
+                          max_total_tokens=max_total_tokens, trial_seconds=trial_seconds,
+                          command_seconds=command_seconds, temperature=temperature,
+                          request_seconds=request_seconds),
+            preflight_only=preflight_only,
+        )
+    except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    if preflight_only:
+        console.print(f"Preflight passed. {result['cases']} cases, {result['trials']} trials. API calls: 0")
+        console.print(f"Skill snapshot: {result['skills']['commit']}", markup=False)
+        return
+    table = Table(title="ILSpy execution: paired baseline versus skill availability")
+    for title in ("Model", "Cases", "Valid pairs", "Excluded", "Baseline", "Skill", "Uplift (pp)"):
+        table.add_column(title)
+    for model, groups in result["summary"].items():
+        for category, values in groups.items():
+            n = values["valid_pairs"]
+            table.add_row(model, category, str(n), str(values["excluded_pairs"]),
+                          f"{values['baseline_rate']:.1%}" if n else "—",
+                          f"{values['skill_rate']:.1%}" if n else "—",
+                          f"{values['uplift_percentage_points']:+.1f}" if n else "—")
+    console.print(table)
