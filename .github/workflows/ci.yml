@@ -89,8 +89,13 @@ jobs:
   # ------------------------------------------------------- vulnerability scan
   # Runs once rather than per matrix entry — the lockfile is interpreter-agnostic.
   #
-  # No third-party action here on purpose: uv exports the lock (with hashes) and
-  # pip-audit runs ephemerally via uvx. Nothing extra to trust, no API key.
+  # No third-party action here on purpose: scripts/audit-deps.py exports the lock
+  # with hashes via uv and runs pip-audit ephemerally through uvx, with the
+  # scanner version pinned in the script. Nothing extra to trust, no API key.
+  #
+  # This is a HARD GATE. Any finding without a documented, unexpired entry in
+  # .pip-audit-exceptions.json fails the build. Do not soften it to
+  # continue-on-error — add a reviewed, dated exception instead.
   audit:
     name: Dependency vulnerability audit
     runs-on: ubuntu-latest
@@ -103,35 +108,16 @@ jobs:
           python-version: "3.13"
           enable-cache: true
 
-      - name: Export locked dependencies
-        run: |
-          uv export --frozen --extra dev --no-emit-project \
-            --format requirements-txt > requirements.audit.txt
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
 
-      - name: Scan against the PyPI advisory DB
-        # continue-on-error is a KNOWN, TEMPORARY concession: the current lock
-        # carries 66 advisories across 15 packages (aiohttp, litellm, urllib3,
-        # requests, pydantic-adjacent transitives, ...). Flipping this to a hard
-        # gate is the goal — do it in the PR that runs `uv lock --upgrade` and
-        # lands green. Track it in the repo until then.
-        continue-on-error: true
-        run: |
-          # -o pipefail is load-bearing: without it the exit status of the
-          # pipeline is tee's (always 0) and this gate can never fail. Actions'
-          # default shell does not enable pipefail.
-          set -euo pipefail
-          uvx --from pip-audit pip-audit \
-            --require-hashes \
-            --disable-pip \
-            --strict \
-            --progress-spinner off \
-            -r requirements.audit.txt \
-            | tee pip-audit-report.txt
+      - name: Audit locked dependencies against the PyPI advisory DB
+        run: uv run --frozen python scripts/audit-deps.py --output pip-audit-report.json
 
       - name: Upload audit report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.2
         with:
           name: pip-audit-report
-          path: pip-audit-report.txt
+          path: pip-audit-report.json
           retention-days: 30
