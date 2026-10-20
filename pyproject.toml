@@ -8,18 +8,26 @@ authors = [
     {name = "Aaron Stannard", email = "aaron@petabridge.com"},
 ]
 dependencies = [
-    "dspy>=2.6",
-    "click>=8.0",
-    "pyyaml>=6.0",
-    "python-frontmatter>=1.0",
-    "rich>=13.0",
-    "python-dotenv>=1.0",
+    # Floors raised to the majors actually in use. The old bounds (dspy>=2.6,
+    # click>=8.0, ...) let a fresh resolve pick a major with a different API, so
+    # a `uv sync` without the lock could produce a tree this code cannot run on.
+    "dspy>=3.4,<4",
+    # Direct dependency: eval_activation/mechanisms.py calls litellm.completion()
+    # in four places. It was never declared and only resolved because dspy happens
+    # to depend on it. Declaring it keeps that load-bearing import from silently
+    # disappearing on a dspy bump, and keeps it visible to pip-audit.
+    "litellm>=1.105,<2",
+    "click>=8.3,<9",
+    "pyyaml>=6.0,<7",
+    "python-frontmatter>=1.1,<2",
+    "rich>=14.3,<16",
+    "python-dotenv>=1.2,<2",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.23",
+    "pytest>=9.0,<10",
+    "pytest-asyncio>=1.3,<2",
 ]
 
 [project.scripts]
@@ -28,6 +36,14 @@ dotnet-evals = "dotnet_skills_evals.cli:cli"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv]
+# 7-day supply-chain quarantine, enforced by the resolver rather than by memory.
+# uv rejects any candidate published fewer than 7 days ago on every resolve, so
+# the rule survives a plain `uv lock` (passing --exclude-newer on the CLI only
+# records it for that one run - the next lock without the flag drops it).
+# Keep this in sync with Dependabot's cooldown: default-days: 7.
+exclude-newer = "7 days"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dotnet_skills_evals"]
