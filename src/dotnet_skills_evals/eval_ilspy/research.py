@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
 import time
 
@@ -26,7 +27,7 @@ def function(name: str, description: str, properties: dict, required: list[str])
 
 RESEARCH_TOOLS = [
     function("fetch_url", "Read a public web page or source URL.", {"url": {"type": "string"}}, ["url"]),
-    function("github_search", "Search public GitHub repositories, code, or issues and PRs. Code search covers the default branch.",
+    function("github_search", "Search public GitHub repositories, code, or issues and PRs. Code queries require repo:owner/name scopes and cover the default branch. Use kind=repositories to discover repositories first.",
              {"query": {"type": "string"}, "kind": {"type": "string", "enum": ["code", "repositories", "issues"]}}, ["query"]),
     function("checkout_repository", "Download a public GitHub repository at a chosen tag, branch, or commit into the container for local inspection.",
              {"repository": {"type": "string", "description": "owner/name"}, "ref": {"type": "string"}}, ["repository", "ref"]),
@@ -53,7 +54,7 @@ def github_token() -> str:
 
 @dataclass(frozen=True)
 class ResearchConfig:
-    github_token: str = ""
+    github_token: str = field(default="", repr=False)
 
     def provenance(self) -> dict:
         return {"web_search": WEB_SEARCH_TOOL, "client_tools": sorted(RESEARCH_NAMES),
@@ -86,7 +87,7 @@ class ResearchTools:
                 result = self.sources.read(args["assembly"], args["document"])
             else:
                 raise RetrievalError("Unknown research tool")
-        except (ValueError, OSError, KeyError, TypeError, subprocess.SubprocessError) as exc:
+        except (ValueError, OSError, KeyError, TypeError, tarfile.TarError, subprocess.SubprocessError) as exc:
             result = {"error": str(exc)}
         self.events.append({"tool": name, "arguments": args, "result": result,
                             "elapsed_seconds": time.monotonic() - started})

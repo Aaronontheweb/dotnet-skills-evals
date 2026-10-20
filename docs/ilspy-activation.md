@@ -5,8 +5,8 @@ successful use of ILSpy to inspect a relevant NuGet dependency?**
 
 Each model/case/repetition gets a matched pair of fresh containers and separate
 conversations. Baseline has the registered skill catalog minus `ilspy-decompile`;
-treatment has the full catalog. Both have the same installed ILSpy, shell tool,
-source, packages, prompt, resource limits, and model settings. The treatment
+treatment has the full catalog. Both have the same installed ILSpy, shell and
+research tools, source, packages, prompt, resource limits, and model settings. The treatment
 advertises the skill through `invoke_skill`; its instructions are loaded only if
 the model requests them. Skill loading is recorded separately from ILSpy use.
 
@@ -19,7 +19,9 @@ to this agent environment. There are no API calls to a judge.
 Requires Linux or macOS with Docker running, Git, and uv. Docker runs Linux
 containers. Python 3.11+ is managed by uv; .NET and ILSpy live inside the fixture.
 The fixture build needs public GitHub, NuGet, Debian and Microsoft registry access.
-Individual model trials run offline, with no host mounts or credentials passed in.
+Trial shells run offline, with no host mounts or credentials passed in. Research
+tools retrieve public internet content through the runner and copy requested
+source snapshots or symbols into the container.
 
 From the evaluation worktree:
 
@@ -40,8 +42,13 @@ credits and access to the subject models**. Set it in this worktree's ignored
 OPENROUTER_API_KEY=your-openrouter-key
 ```
 
-No separate Anthropic, OpenAI, or GitHub token is required. The existing harness
-routes all subject models through OpenRouter. A model must support function tools.
+No separate Anthropic or OpenAI key is required. Public GitHub code search needs
+`GITHUB_TOKEN` or `GH_TOKEN`, or an existing local `gh auth login`. The runner
+captures that token internally; it is never included in tool arguments, prompts,
+reports, or containers. No private repository access is needed. Runs require this
+credential so code search is available in both arms; preflight reports whether
+one is configured without validating it. The existing harness routes all subject
+models through OpenRouter, including web search. A model must support function tools.
 Use explicit versioned IDs where available; moving aliases weaken reproducibility.
 
 The skill repository defaults to `~/repositories/dotnet-skills`. Set
@@ -68,6 +75,64 @@ Preflight validates the dataset, skill snapshot, pinned source commit, target
 assembly identities, installed tool, and scoring controls. It reports trial
 counts and makes **zero model API calls**, even if a key is already configured.
 It does not validate model access or provider compatibility.
+
+## Available investigation methods
+
+Both arms receive these tools from the first model request:
+
+| Tool | Behavior |
+| --- | --- |
+| `shell` | Search the project, restored packages, downloaded source, and run the installed SDK or ILSpy. The shell has no network. |
+| `openrouter:web_search` | Native server search using Exa: at most 3 uses per model request, 5 results per search, 2,000 characters per result. Uses the OpenRouter key and incurs search charges. |
+| `fetch_url` | Retrieve a public page or raw source URL, returning text and a content hash. |
+| `github_search` | Search public repositories or issues/PRs; search code using `repo:owner/name` scopes validated as public before searching. Code search covers the default branch. |
+| `checkout_repository` | Resolve a public tag/branch/commit to its full SHA and put that source snapshot in the container. Returns the SHA and archive hash. |
+| `sourcelink_documents` | Read assembly debug metadata and matching Portable PDBs, including embedded PDBs or downloads from NuGet/Microsoft symbol servers; list source documents and SourceLink URLs. |
+| `read_source` | Retrieve SourceLink or embedded source and verify its checksum against the matching PDB. |
+| `invoke_skill` | Load a registered skill on request; only the target skill's availability differs between arms. |
+
+Nothing forces the model to inspect a dependency, search, or use ILSpy. SourceLink
+failures remain visible tool errors or symbol lookup failures, so the model can
+try another method. GitHub code search does not prove what an older package
+version contains; a resolved checkout or matching PDB provides version evidence.
+
+At implementation time, the NuGet symbol server and symbol-package endpoint
+returned 404 for `Serilog.Sinks.PeriodicBatching` 4.0.0. Its `v4.0.0` GitHub
+checkout remains available. The live SourceLink test uses the fixture's restored
+`Serilog` 3.1.1 assembly, whose published PDB and original source are available.
+Adding the tools cannot supply symbols a package author did not publish.
+
+Public pages and source can change. The run saves retrieved bytes, hashes,
+timestamps and URLs under `retrieval-cache`, plus client tool arguments and
+results in each trial artifact. OpenRouter search usage and returned citations
+are retained as supplied by the API; this is not a full search-result replay.
+The HTTP cache is shared across arms within a run. Credentials are excluded from
+cache metadata. Host retrieval rejects nonpublic addresses and archive links or
+path traversal; repository code is never executed on the host.
+
+Rebuild with `prepare-ilspy` after pulling these changes; the image now includes
+the metadata reader. Earlier offline-only pilot results belong to a different
+tool environment and should be reported separately.
+
+## Pilot size
+
+Start the revised `seq-queue-retry` case with **3 repetitions per model**. Across
+three models this schedules **18 trials** (3 models × 3 repetitions × 2 arms).
+Five repetitions would schedule **30 trials**. Review transcripts to confirm
+the research tools work and that the model has a meaningful choice of methods
+before expanding. Neither size supports a precise general activation-rate claim;
+this remains one question about one project/dependency.
+
+For example, repeat `--model` with each explicit subject model ID:
+
+```bash
+uv run --frozen dotnet-evals eval-ilspy \
+  --model 'openrouter/<provider>/<opus-model-id>' \
+  --model 'openrouter/<provider>/<sonnet-model-id>' \
+  --model 'openrouter/<provider>/<haiku-model-id>' \
+  --case seq-queue-retry --repetitions 3 \
+  --output results/ilspy/research-pilot-3x.json
+```
 
 After configuring the key, start with one pair:
 
@@ -137,9 +202,11 @@ without instructing the model to trace dependency implementations. The two
 repository-only controls ask about configuration
 branching and argument validation that are visible directly in the checkout.
 
-The model receives the project source and restored packages, but no dependency
-source checkout or web access. This holds alternative retrieval paths constant
-and makes this specifically an offline dependency-investigation benchmark.
+The model starts with the project source and restored packages. It may retrieve
+dependency source, search public material, or decompile the installed assembly.
+Those alternatives are identical in both conditions. The remaining two dependency
+prompts still name more implementation details than the revised queue/retry case;
+review them before treating all five cases as an equally natural issue report.
 
 Reviewer orientation, established by manually inspecting the pinned assembly:
 
@@ -208,17 +275,38 @@ host mounts or provider keys. Shell output is drained with bounded host buffers.
 The chosen `--output` JSON is checkpointed after every trial. It includes the
 harness revision and source hashes. A sibling directory
 with the same stem stores each conversation, model usage, tool results, and
-ILSpy execution events. Generated decompilation files are ephemeral; their
+research tool events, search usage/citations and ILSpy execution events. Generated decompilation files are ephemeral; their
 hashes and paths are retained. Containers are removed on exit. Results are
 ignored by Git.
 
 Deterministic checks, with no paid API calls:
 
 ```bash
-uv run --frozen pytest -q
+uv run --frozen pytest -q -m 'not openrouter and not network'
 uv run --frozen python scripts/validate-datasets.py
 uv run --frozen dotnet-evals prepare-ilspy
 ```
+
+The source metadata integration tests require a local .NET 10 SDK. They compile
+real Portable PDBs and exercise HTTP source/symbol retrieval, embedded source,
+missing symbols, mismatched PDBs, and incorrect source checksums. A separate CI
+job runs these tests; the Python matrix runs the other deterministic checks.
+
+Optional live checks, outside CI:
+
+```bash
+# Public GitHub search, versioned checkout and actual NuGet SourceLink through Docker.
+uv run --frozen pytest -q -m network --run-network
+
+# One bounded paid web-search request. Uses Haiku by default; override via
+# OPENROUTER_TEST_MODEL=openrouter/<provider>/<model-id>.
+uv run --frozen pytest -q -m openrouter --run-openrouter
+```
+
+These are tool integration checks, not activation evals. OpenRouter checks are
+skipped unless explicitly enabled locally and are **always skipped when `CI` is
+set**, including manual workflows. CI also clears `OPENROUTER_API_KEY` and excludes
+the paid tests. No API key is configured as a CI secret.
 
 Unit tests use scripted provider responses to exercise tool-loop behavior,
 skill availability, score exclusions, paired metrics, error checkpointing,

@@ -6,6 +6,8 @@ import json
 import os
 import selectors
 import subprocess
+import tarfile
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -100,16 +102,27 @@ class DockerSandbox:
         return [json.loads(line) for line in raw.splitlines() if line.strip()]
 
     def put_tree(self, source: Path) -> str:
-        destination = f"/tmp/research-{uuid.uuid4().hex}"
-        docker("exec", self.name, "mkdir", "-p", destination)
-        docker("cp", str(source) + "/.", f"{self.name}:{destination}")
-        return destination
+        return self._put_archive(source, ".")
 
     def put_file(self, source: Path) -> str:
+        return f"{self._put_archive(source, source.name)}/{source.name}"
+
+    def _put_archive(self, source: Path, archive_name: str) -> str:
         destination = f"/tmp/research-{uuid.uuid4().hex}"
         docker("exec", self.name, "mkdir", "-p", destination)
-        docker("cp", str(source), f"{self.name}:{destination}/{source.name}")
-        return f"{destination}/{source.name}"
+        # docker cp rejects this container's read-only rootfs, including tmpfs
+        # destinations. Extract via the running unprivileged process into /tmp.
+        with tempfile.TemporaryFile() as stream:
+            with tarfile.open(fileobj=stream, mode="w") as archive:
+                archive.add(source, arcname=archive_name)
+            stream.seek(0)
+            result = subprocess.run(["docker", "exec", "-i", self.name, "tar", "-xf", "-",
+                                     "-C", destination, "--no-same-owner"],
+                                    stdin=stream, capture_output=True, text=True,
+                                    timeout=self.command_timeout + 15)
+        if result.returncode:
+            raise RuntimeError(f"Container research upload failed: {result.stderr.strip()}")
+        return destination
 
     def inspect_sources(self, assembly: str, pdb: str | None = None,
                         document: str | None = None, offset: int = 0) -> dict:

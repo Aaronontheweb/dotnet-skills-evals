@@ -163,7 +163,8 @@ def run_trial(model: str, case: dict, condition: str, snapshot: dict, image: str
                     prompt_tokens += response.usage.prompt_tokens
                     completion_tokens += response.usage.completion_tokens
                     usage = response.usage.model_dump()
-                    searches += (usage.get("server_tool_use") or {}).get("web_search_requests", 0)
+                    search_usage = usage.get("server_tool_use_details") or usage.get("server_tool_use") or {}
+                    searches += search_usage.get("web_search_requests", 0)
                     served_models.add(response.model)
                     choice = response.choices[0]
                     message = choice.message.model_dump(exclude_none=True)
@@ -267,7 +268,7 @@ def run_eval(models: tuple[str, ...], dataset: Path = DATASET, repetitions: int 
     if preflight_only:
         return {"preflight": preflight, "models": resolved, "cases": len(cases),
                 "trials": len(resolved) * len(cases) * repetitions * 2,
-                "skills": provenance, "api_calls": 0}
+                "skills": provenance, "research": research_config.provenance(), "api_calls": 0}
     if not OPENROUTER_API_KEY or OPENROUTER_API_KEY == "sk-or-...":
         raise ValueError("Set OPENROUTER_API_KEY in the environment or worktree .env")
     if not research_config.github_token:

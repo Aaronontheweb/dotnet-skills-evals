@@ -1,6 +1,8 @@
 import hashlib
 import io
 import json
+import socket
+from types import SimpleNamespace
 from pathlib import Path
 import tarfile
 import urllib.parse
@@ -11,6 +13,7 @@ import pytest
 from dotnet_skills_evals.eval_ilspy.research import ResearchConfig, ResearchTools, WEB_SEARCH_TOOL
 from dotnet_skills_evals.eval_ilspy.retrieval import GitHubClient, HttpClient, RetrievalError, extract_snapshot, fetch_url
 from dotnet_skills_evals.eval_ilspy.sources import mapped_url
+from dotnet_skills_evals.eval_ilspy import sandbox as sandbox_module
 
 
 def archive_bytes(name="root/src/Example.cs", content=b"public class Example {}", kind=None):
@@ -61,6 +64,56 @@ def test_model_cannot_fetch_host_files_or_private_addresses(tmp_path, url):
         HttpClient(tmp_path).get(url)
 
 
+def test_dns_rebinding_cannot_reach_a_local_http_service(tmp_path, serve_http, monkeypatch):
+    server = serve_http({"/private": (200, {"Content-Type": "text/plain"}, "host secret")})
+    port = urllib.parse.urlsplit(server.url).port
+    lookups = []
+
+    def alternating_dns(host, requested_port, **kwargs):
+        lookups.append(host)
+        address = "8.8.8.8" if len(lookups) == 1 else "127.0.0.1"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, requested_port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", alternating_dns)
+    with pytest.raises(RetrievalError, match="public internet addresses"):
+        HttpClient(tmp_path).get(f"http://rebind.example:{port}/private")
+    assert len(lookups) == 2
+    assert not server.requests
+
+
+def test_research_config_never_formats_token():
+    assert "private-token" not in repr(ResearchConfig("private-token"))
+    assert "private-token" not in json.dumps(ResearchConfig("private-token").provenance())
+
+
+@pytest.mark.parametrize("tree", [False, True])
+def test_upload_streams_archive_to_unprivileged_tmpfs_process(tmp_path, monkeypatch, tree):
+    source = tmp_path / "source.cs"
+    source.write_text("class Source {}")
+    (tmp_path / "other.txt").write_text("other")
+    commands, members = [], {}
+    monkeypatch.setattr(sandbox_module, "docker", lambda *args: commands.append(list(args)))
+
+    def transfer(args, **kwargs):
+        commands.append(args)
+        with tarfile.open(fileobj=kwargs["stdin"], mode="r:") as archive:
+            for member in archive:
+                if member.isfile():
+                    members[member.name.removeprefix("./")] = archive.extractfile(member).read()
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(sandbox_module.subprocess, "run", transfer)
+    sandbox = sandbox_module.DockerSandbox("image")
+    destination = sandbox.put_tree(tmp_path) if tree else sandbox.put_file(source)
+    assert destination.startswith("/tmp/research-")
+    assert members["source.cs"] == b"class Source {}"
+    assert ("other.txt" in members) is tree
+    assert commands[1][:4] == ["docker", "exec", "-i", sandbox.name]
+    assert "tar" in commands[1]
+    assert "--no-same-owner" in commands[1]
+    assert "cp" not in commands[1]
+
+
 def test_redirect_does_not_forward_github_token(tmp_path, serve_http):
     target = serve_http({"/download": (200, {}, b"archive")})
     origin = serve_http({"/start": (302, {"Location": target.url + "/download"}, b"")})
@@ -72,13 +125,14 @@ def test_redirect_does_not_forward_github_token(tmp_path, serve_http):
 
 
 def test_github_code_search_executes_query_and_retains_matches(tmp_path, serve_http):
-    query = urllib.parse.urlencode({"q": "PeriodicBatchingSink is:public", "per_page": 5})
-    server = serve_http({"/search/code?" + query: (200, {}, {"total_count": 1, "items": [{
+    query = urllib.parse.urlencode({"q": "PeriodicBatchingSink repo:owner/repo", "per_page": 5})
+    server = serve_http({"/repos/owner/repo": (200, {}, {"private": False}),
+        "/search/code?" + query: (200, {}, {"total_count": 1, "items": [{
         "path": "src/Sink.cs", "repository": {"full_name": "owner/repo", "private": False},
         "html_url": "https://github.com/owner/repo/blob/main/src/Sink.cs",
         "text_matches": [{"fragment": "class PeriodicBatchingSink"}]}]})})
     github = GitHubClient(HttpClient(tmp_path, allow_loopback=True), "test-token", server.url)
-    result = github.search("PeriodicBatchingSink")
+    result = github.search("PeriodicBatchingSink repo:owner/repo")
     assert result["results"][0]["matches"] == ["class PeriodicBatchingSink"]
     assert server.requests[0]["headers"]["Authorization"] == "Bearer test-token"
     assert "default branch" in result["note"]
@@ -91,6 +145,22 @@ def test_code_search_requires_auth_and_private_results_are_rejected(tmp_path, se
     server = serve_http({"/repos/owner/private": (200, {}, {"private": True})})
     with pytest.raises(RetrievalError, match="public"):
         GitHubClient(http, "test", server.url).revision("owner/private", "main")
+    with pytest.raises(RetrievalError, match="public"):
+        GitHubClient(http, "test", server.url).search("repo:owner/private secret")
+    assert not any(r["path"].startswith("/search/") for r in server.requests)
+
+
+@pytest.mark.parametrize("query", ["PeriodicBatchingSink", "-repo:owner/public secret",
+    '"repo:owner/public" secret', '"literal repo:owner/public text" secret',
+    "repo:owner/public safe OR secret", "org:owner secret repo:owner/public"])
+def test_code_search_explains_required_public_repository_scope(tmp_path, query):
+    with pytest.raises(RetrievalError, match="kind=repositories"):
+        GitHubClient(HttpClient(tmp_path), "test").search(query)
+
+
+def test_code_search_rejects_unclosed_quotes_before_any_request(tmp_path):
+    with pytest.raises(ValueError, match="quotation"):
+        GitHubClient(HttpClient(tmp_path), "test").search('literal" repo:owner/public secret')
 
 
 def test_checkout_resolves_tag_to_commit_and_extracts_source(tmp_path, serve_http):
@@ -129,7 +199,8 @@ def test_tool_failures_are_recorded_as_failures(tmp_path, serve_http):
     assert tools.events[0]["result"] == result
 
 
-def test_openrouter_server_search_survives_litellm_wire_translation(serve_http):
+@pytest.mark.parametrize("usage_field", ["server_tool_use_details", "server_tool_use"])
+def test_openrouter_server_search_survives_litellm_wire_translation(serve_http, usage_field):
     captured = []
 
     def complete(request):
@@ -139,12 +210,12 @@ def test_openrouter_server_search_survives_litellm_wire_translation(serve_http):
             "message": {"role": "assistant", "content": "Found source", "annotations": [{"type": "url_citation",
             "url_citation": {"url": "https://github.com/example/repo", "title": "Source", "start_index": 0, "end_index": 5}}]}}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
-                      "server_tool_use": {"web_search_requests": 1}}}
+                      usage_field: {"web_search_requests": 1}}}
 
     server = serve_http({"/chat/completions": complete})
     result = litellm.completion(model="openrouter/anthropic/claude-haiku-5.5",
         messages=[{"role": "user", "content": "Find source"}], tools=[WEB_SEARCH_TOOL],
         api_key="dummy-local-test-key", api_base=server.url, num_retries=0, caching=False)
     assert captured[0]["tools"] == [WEB_SEARCH_TOOL]
-    assert result.usage.model_dump()["server_tool_use"]["web_search_requests"] == 1
+    assert result.usage.model_dump()[usage_field]["web_search_requests"] == 1
     assert result.choices[0].message.model_dump()["annotations"][0]["url_citation"]["url"].startswith("https://github.com/")

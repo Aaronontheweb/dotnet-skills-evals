@@ -592,6 +592,8 @@ def eval_ilspy(models, dataset, case_ids, repetitions, skills_repo, image, outpu
     if preflight_only:
         console.print(f"Preflight passed. {result['cases']} cases, {result['trials']} trials. API calls: 0")
         console.print(f"Skill snapshot: {result['skills']['commit']}", markup=False)
+        configured = result["research"]["github_authenticated"]
+        console.print(f"GitHub credential configured: {configured} (not validated by preflight)")
         return
     table = Table(title="ILSpy execution: paired baseline versus skill availability")
     for title in ("Model", "Cases", "Valid pairs", "Excluded", "Baseline", "Skill", "Uplift (pp)"):

@@ -171,14 +171,17 @@ cp .env.example .env
 
 The execution-based ILSpy eval compares actual dependency decompilation with
 `ilspy-decompile` available versus the same environment without that skill.
-It uses a pinned OSS checkout, locked NuGet dependencies, fresh offline Docker
-containers, and paired trials. See the [setup, credentials, and run instructions](docs/ilspy-activation.md).
+It uses a pinned OSS checkout, locked NuGet dependencies, fresh Docker containers,
+and paired trials. Both arms have web search, public page retrieval, GitHub search
+and versioned checkout, and SourceLink/embedded source retrieval. The shell stays
+offline; research requests run through the harness. See the
+[setup, credentials, and run instructions](docs/ilspy-activation.md).
 
 ```bash
 # Build and check the real fixture; no model calls or API key needed.
 uv run --frozen dotnet-evals prepare-ilspy
 
-# Supply an OpenRouter key in .env and choose a versioned model ID.
+# Supply an OpenRouter key in .env, a GitHub token or gh login, and a model ID.
 uv run --frozen dotnet-evals eval-ilspy \
   --model 'openrouter/<provider>/<versioned-model-id>' \
   --case seq-queue-retry --repetitions 1

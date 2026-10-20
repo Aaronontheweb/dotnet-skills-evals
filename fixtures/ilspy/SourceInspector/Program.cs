@@ -29,12 +29,19 @@ try
     using var assemblyStream = File.OpenRead(assemblyPath);
     using var pe = new PEReader(assemblyStream);
     var symbolKeys = new List<string>();
+    var pdbChecksums = new Dictionary<string, string>();
     foreach (var entry in pe.ReadDebugDirectory())
     {
+        if (entry.Type == DebugDirectoryEntryType.PdbChecksum)
+        {
+            var checksum = pe.ReadPdbChecksumDebugDirectoryData(entry);
+            pdbChecksums.Add(checksum.AlgorithmName,
+                Convert.ToHexString(checksum.Checksum.ToArray()).ToLowerInvariant());
+        }
         if (entry.Type != DebugDirectoryEntryType.CodeView || !entry.IsPortableCodeView)
             continue;
         var data = pe.ReadCodeViewDebugDirectoryData(entry);
-        var name = Path.GetFileName(data.Path.Replace('\\', '/'));
+        var name = Path.GetFileName(data.Path.Replace('\\', '/')).ToLowerInvariant();
         symbolKeys.Add($"{name}/{data.Guid:N}FFFFFFFF/{name}");
     }
     // PEReader validates that the supplied Portable PDB belongs to this PE.
@@ -48,9 +55,17 @@ try
         var mappings = new Dictionary<string, string>();
         var documents = new List<SourceDocument>();
         byte[]? embeddedSource = null;
+        bool? pdbChecksumVerified = null;
         if (found && provider is not null)
         {
             var reader = provider.GetMetadataReader();
+            var checksumPath = externalPdb ?? pdbPath;
+            if (checksumPath is not null && pdbChecksums.Count > 0)
+            {
+                ValidatePdbChecksum(checksumPath, reader.DebugMetadataHeader
+                    ?? throw new BadImageFormatException("Missing Portable PDB header"), pdbChecksums);
+                pdbChecksumVerified = true;
+            }
             foreach (var handle in reader.CustomDebugInformation)
             {
                 var info = reader.GetCustomDebugInformation(handle);
@@ -86,7 +101,8 @@ try
         Console.WriteLine(JsonSerializer.Serialize(new
         {
             Assembly = assemblyPath, PdbFound = found, PdbPath = pdbPath,
-            SymbolKeys = symbolKeys, Mappings = mappings, Documents = selected,
+            SymbolKeys = symbolKeys, PdbChecksums = pdbChecksums, PdbChecksumVerified = pdbChecksumVerified,
+            Mappings = mappings, Documents = selected,
             TotalDocuments = documents.Count,
             NextOffset = requestedDocument is null && offset + selected.Length < documents.Count
                 ? (int?)(offset + selected.Length) : null,
@@ -108,7 +124,11 @@ static byte[] ReadEmbedded(byte[] blob)
         throw new BadImageFormatException("Truncated embedded source");
     var size = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(blob);
     if (size == 0)
+    {
+        if (blob.Length - 4 > 4 * 1024 * 1024)
+            throw new BadImageFormatException("Embedded source exceeds the 4 MiB limit");
         return blob[4..];
+    }
     if (size < 0 || size > 4 * 1024 * 1024)
         throw new BadImageFormatException("Embedded source exceeds the 4 MiB limit");
     using var input = new MemoryStream(blob, 4, blob.Length - 4);
@@ -118,6 +138,31 @@ static byte[] ReadEmbedded(byte[] blob)
     if (decompressor.ReadByte() != -1)
         throw new BadImageFormatException("Embedded source length mismatch");
     return output;
+}
+
+static void ValidatePdbChecksum(string path, DebugMetadataHeader header,
+    IReadOnlyDictionary<string, string> checksums)
+{
+    using var stream = File.OpenRead(path);
+    if (stream.Length > 32 * 1024 * 1024)
+        throw new BadImageFormatException("PDB exceeds the 32 MiB limit");
+    var content = new byte[checked((int)stream.Length)];
+    stream.ReadExactly(content);
+    // Portable PDB checksums hash the file with its 20-byte debug ID zeroed.
+    // https://github.com/dotnet/symstore/blob/main/src/Microsoft.SymbolStore/ChecksumValidator.cs
+    content.AsSpan(header.IdStartOffset, header.Id.Length).Clear();
+    foreach (var (algorithm, expected) in checksums)
+    {
+        var actual = algorithm.ToUpperInvariant() switch
+        {
+            "SHA256" => System.Security.Cryptography.SHA256.HashData(content),
+            "SHA1" => System.Security.Cryptography.SHA1.HashData(content),
+            _ => null
+        };
+        if (actual is not null && Convert.ToHexString(actual).Equals(expected, StringComparison.OrdinalIgnoreCase))
+            return;
+    }
+    throw new BadImageFormatException("PDB checksum mismatch or unsupported checksum algorithm");
 }
 
 internal sealed record SourceDocument(string Name, string? HashAlgorithm, string Checksum, bool Embedded);

@@ -5,12 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
+import http.client
 from html.parser import HTMLParser
 import io
 import ipaddress
 import json
 from pathlib import Path, PurePosixPath
 import re
+import shlex
 import socket
 import tarfile
 import urllib.error
@@ -27,6 +29,79 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def public_addresses(host: str, port: int, allow_loopback: bool) -> list:
+    try:
+        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise RetrievalError(f"Cannot resolve {host}") from exc
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if not ip.is_global and not (allow_loopback and ip.is_loopback):
+            raise RetrievalError("Research tools only retrieve public internet addresses")
+    return addresses
+
+
+def connect_public(host: str, port: int, timeout: float, allow_loopback: bool) -> socket.socket:
+    # Connect to the checked numeric sockaddr. A second hostname resolution at
+    # connect time would allow DNS rebinding to host-local services.
+    addresses = public_addresses(host, port, allow_loopback)
+    last_error = None
+    for family, kind, protocol, _, address in addresses:
+        connection = socket.socket(family, kind, protocol)
+        try:
+            connection.settimeout(timeout)
+            connection.connect(address)
+            return connection
+        except OSError as error:
+            connection.close()
+            last_error = error
+    raise OSError("Cannot connect to a validated public address") from last_error
+
+
+class PublicHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, *args, allow_loopback=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.allow_loopback = allow_loopback
+
+    def connect(self):
+        self.sock = connect_public(self.host, self.port, self.timeout, self.allow_loopback)
+
+
+class PublicHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, *args, allow_loopback=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.allow_loopback = allow_loopback
+
+    def connect(self):
+        connection = connect_public(self.host, self.port, self.timeout, self.allow_loopback)
+        try:
+            # Retain hostname verification and SNI while connecting to a checked IP.
+            self.sock = self._context.wrap_socket(connection, server_hostname=self.host)
+        except Exception:
+            connection.close()
+            raise
+
+
+class PublicHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, allow_loopback):
+        super().__init__()
+        self.allow_loopback = allow_loopback
+
+    def http_open(self, request):
+        return self.do_open(lambda host, **kw: PublicHTTPConnection(
+            host, allow_loopback=self.allow_loopback, **kw), request)
+
+
+class PublicHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, allow_loopback):
+        super().__init__()
+        self.allow_loopback = allow_loopback
+
+    def https_open(self, request):
+        return self.do_open(lambda host, **kw: PublicHTTPSConnection(
+            host, allow_loopback=self.allow_loopback, **kw), request, context=self._context)
+
+
 @dataclass(frozen=True)
 class Retrieved:
     url: str
@@ -41,20 +116,15 @@ class HttpClient:
         self.cache_dir = cache_dir
         self.allow_loopback = allow_loopback
         self.cache: dict[str, Retrieved] = {}
-        self.opener = urllib.request.build_opener(NoRedirect)
+        self.opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), NoRedirect,
+            PublicHTTPHandler(allow_loopback), PublicHTTPSHandler(allow_loopback))
 
     def validate_url(self, url: str) -> None:
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme not in {"https", "http"} or not parsed.hostname or parsed.username or parsed.password:
             raise RetrievalError("Use an HTTP(S) URL without embedded credentials")
-        try:
-            addresses = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
-        except OSError as exc:
-            raise RetrievalError(f"Cannot resolve {parsed.hostname}") from exc
-        for address in addresses:
-            ip = ipaddress.ip_address(address[4][0])
-            if not ip.is_global and not (self.allow_loopback and ip.is_loopback):
-                raise RetrievalError("Research tools only retrieve public internet addresses")
+        public_addresses(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80), self.allow_loopback)
 
     def get(self, url: str, *, headers: dict | None = None, max_bytes: int = 8 * 1024 * 1024) -> Retrieved:
         headers = {"User-Agent": "dotnet-skills-evals/0.1", "Accept-Encoding": "identity", **(headers or {})}
@@ -74,7 +144,9 @@ class HttpClient:
             except urllib.error.HTTPError as exc:
                 if exc.code in {301, 302, 303, 307, 308} and exc.headers.get("Location"):
                     next_url = urllib.parse.urljoin(url, exc.headers["Location"])
-                    if urllib.parse.urlsplit(url).netloc != urllib.parse.urlsplit(next_url).netloc:
+                    origin = urllib.parse.urlsplit(url)
+                    target = urllib.parse.urlsplit(next_url)
+                    if (origin.scheme, origin.netloc) != (target.scheme, target.netloc):
                         headers = {k: v for k, v in headers.items() if k.lower() not in {"authorization", "cookie"}}
                     url = next_url
                     exc.close()
@@ -155,13 +227,27 @@ class GitHubClient:
             raise RetrievalError("kind must be code, issues, or repositories")
         if kind == "code" and not self.token:
             raise RetrievalError("GitHub code search requires GITHUB_TOKEN or GH_TOKEN")
-        params = urllib.parse.urlencode({"q": query + " is:public", "per_page": 5})
+        if kind == "code":
+            # REST code search treats is:public as text rather than a visibility
+            # qualifier. Validate explicit repo scopes before issuing the search.
+            shlex.split(query)  # Reject unmatched quotes, including inside bare terms.
+            tokens = shlex.split(query, posix=False)
+            repositories = [token[5:] for token in tokens if token.lower().startswith("repo:")]
+            if not repositories or re.search(r"\b(?:org|user):|\bOR\b", query, flags=re.IGNORECASE):
+                raise RetrievalError("Code search requires repo:owner/name public scopes; use kind=repositories to discover repositories first")
+            for repository in set(repositories):
+                self.public_repository(repository)
+            terms = [token for token in tokens if not token.lower().startswith("repo:")]
+            scoped_query = " ".join([*terms, *(f"repo:{repo}" for repo in sorted(set(repositories)))])
+        else:
+            scoped_query = query + " is:public"
+        params = urllib.parse.urlencode({"q": scoped_query, "per_page": 5})
         response = self.get(f"/search/{kind}?{params}")
         data = json.loads(response.body)
         items = []
         for item in data["items"]:
             repo = item.get("repository", item if kind == "repositories" else {})
-            if repo.get("private"):
+            if repo.get("private") or (kind == "code" and repo.get("private") is not False):
                 raise RetrievalError("Only public repositories are available in this eval")
             items.append({"title": item.get("title", item.get("name")), "path": item.get("path"),
                           "repository": repo.get("full_name"), "url": item.get("html_url"),
@@ -172,14 +258,17 @@ class GitHubClient:
                 "note": "GitHub code search indexes the default branch. Check out the matching revision to inspect older code.",
                 "url": response.url, "sha256": response.sha256}
 
-    def revision(self, repository: str, ref: str) -> str:
+    def public_repository(self, repository: str) -> None:
         if not re.fullmatch(r"[\w.-]+/[\w.-]+", repository) or any(p in {".", ".."} for p in repository.split("/")):
             raise RetrievalError("repository must be owner/name")
-        if not ref or len(ref) > 200:
-            raise RetrievalError("A tag, branch, or commit ref is required")
         metadata = json.loads(self.get(f"/repos/{repository}").body)
         if metadata.get("private", True):
             raise RetrievalError("Only public repositories are available in this eval")
+
+    def revision(self, repository: str, ref: str) -> str:
+        if not ref or len(ref) > 200:
+            raise RetrievalError("A tag, branch, or commit ref is required")
+        self.public_repository(repository)
         data = json.loads(self.get(f"/repos/{repository}/commits/{urllib.parse.quote(ref, safe='')}").body)
         sha = data["sha"]
         if not re.fullmatch(r"[0-9a-f]{40}", sha):
@@ -208,7 +297,7 @@ def extract_snapshot(body: bytes, destination: Path) -> int:
                 continue
             total += member.size
             count += 1
-            if member.size > 8 * 1024 * 1024 or total > 128 * 1024 * 1024 or count > 20000:
+            if member.size < 0 or member.size > 8 * 1024 * 1024 or total > 128 * 1024 * 1024 or count > 20000:
                 raise RetrievalError("Repository snapshot exceeds extraction limits")
             target = destination.joinpath(*path.parts[1:])
             target.parent.mkdir(parents=True, exist_ok=True)

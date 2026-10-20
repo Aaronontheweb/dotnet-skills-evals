@@ -46,11 +46,15 @@ class SourceLinkClient:
         result = self.sandbox.inspect_sources(assembly, self.pdbs.get(assembly), document, offset)
         failures = []
         if not result["pdbFound"]:
+            headers = {"SymbolChecksumValidationSupported": "1"}
+            checksums = result.get("pdbChecksums", {})
+            if checksums:
+                headers["SymbolChecksum"] = ";".join(f"{kind}:{value}" for kind, value in checksums.items())
             for key in result["symbolKeys"]:
                 for server in self.symbol_servers:
                     url = server.rstrip("/") + "/" + urllib.parse.quote(key, safe="/")
                     try:
-                        response = self.http.get(url, max_bytes=32 * 1024 * 1024)
+                        response = self.http.get(url, headers=headers, max_bytes=32 * 1024 * 1024)
                         with tempfile.TemporaryDirectory() as directory:
                             path = Path(directory) / "symbols.pdb"
                             path.write_bytes(response.body)

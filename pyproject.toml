@@ -50,3 +50,8 @@ packages = ["src/dotnet_skills_evals"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "openrouter: paid API integration tests, opt-in locally and always disabled in CI",
+    "network: live public retrieval tests, opt-in locally",
+    "source_inspector: compiled .NET Portable PDB and source retrieval integration tests",
+]

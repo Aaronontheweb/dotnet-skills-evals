@@ -175,6 +175,9 @@ def test_only_target_skill_availability_differs_between_arms(monkeypatch, tmp_pa
     b_request, s_request = b_calls[0], s_calls[0]
     assert b_request["messages"] == s_request["messages"]
     assert b_request["tools"][0] == s_request["tools"][0]
+    assert b_request["tools"][2:] == s_request["tools"][2:]
+    assert b_request["tools"][2] == runner.WEB_SEARCH_TOOL
+    assert b_request["tools"][3:] == runner.RESEARCH_TOOLS
     assert "ilspy-decompile" not in b_request["tools"][1]["function"]["description"]
     assert "ilspy-decompile" in s_request["tools"][1]["function"]["description"]
     assert "TARGET GUIDANCE" not in json.dumps(b_request)
@@ -190,6 +193,15 @@ def test_skill_load_alone_is_not_ilspy_activation(monkeypatch, tmp_path):
     assert result["loaded_skills"] == ["ilspy-decompile"]
     assert not result["activated"]
     assert "TARGET GUIDANCE" in calls[1]["messages"][-1]["content"]
+
+
+@pytest.mark.parametrize("field", ["server_tool_use_details", "server_tool_use"])
+def test_native_search_usage_is_recorded_without_ilspy_activation(monkeypatch, tmp_path, field):
+    reply = response(text="Found source")
+    reply.usage = litellm.Usage(prompt_tokens=10, completion_tokens=5, **{field: {"web_search_requests": 1}})
+    result, _ = trial(monkeypatch, tmp_path, "baseline", [reply])
+    assert result["web_search_requests"] == 1
+    assert not result["activated"]
 
 
 def test_baseline_cannot_load_target_skill_but_can_decompile(monkeypatch, tmp_path):
@@ -219,6 +231,7 @@ def test_preflight_makes_no_model_requests_or_requires_credentials(monkeypatch, 
     monkeypatch.setattr(runner, "snapshot_skills", lambda _: (SNAPSHOT, {"commit": "skills-sha"}))
     monkeypatch.setattr(runner, "check_fixture", lambda _: {"fixture": FIXTURE, "image": {"id": "image"}})
     monkeypatch.setattr(runner, "OPENROUTER_API_KEY", "")
+    monkeypatch.setattr(runner, "github_token", lambda: "")
 
     def forbidden(**kwargs):
         pytest.fail("Preflight must not call a model")
@@ -228,6 +241,7 @@ def test_preflight_makes_no_model_requests_or_requires_credentials(monkeypatch, 
                              repetitions=2, preflight_only=True)
     assert result["trials"] == 4
     assert result["api_calls"] == 0
+    assert result["research"]["github_authenticated"] is False
 
 
 def test_failed_pair_is_checkpointed_and_stops_further_requests(monkeypatch, tmp_path):
@@ -238,6 +252,7 @@ def test_failed_pair_is_checkpointed_and_stops_further_requests(monkeypatch, tmp
     monkeypatch.setattr(runner, "snapshot_skills", lambda _: (SNAPSHOT, {}))
     monkeypatch.setattr(runner, "check_fixture", lambda _: {"fixture": FIXTURE, "image": {"id": "image"}})
     monkeypatch.setattr(runner, "OPENROUTER_API_KEY", "dummy-key")
+    monkeypatch.setattr(runner, "github_token", lambda: "dummy-github-token")
     calls = []
 
     def failed(*args):

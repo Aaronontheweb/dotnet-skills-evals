@@ -14,6 +14,10 @@ concurrency:
 permissions:
   contents: read
 
+# Paid provider checks are local opt-in only, including workflow_dispatch.
+env:
+  OPENROUTER_API_KEY: ""
+
 jobs:
   # ---------------------------------------------------------------- unit tests
   test:
@@ -53,7 +57,31 @@ jobs:
         run: uv sync --frozen --extra dev
 
       - name: Run tests
-        run: uv run --frozen pytest -q
+        run: uv run --frozen pytest -q -m "not openrouter and not network and not source_inspector"
+
+  source-inspector:
+    name: Portable PDB and source retrieval integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      # Real assemblies, Portable PDBs, embedded source and local HTTP servers.
+      # No provider or GitHub credentials, Docker, or external source service.
+      - name: Verify symbol matching and source checksums
+        run: uv run --frozen pytest -q -m source_inspector
 
   # ------------------------------------------------------- dataset integrity
   # Guards the eval data formats without spending API credits. A malformed JSONL
