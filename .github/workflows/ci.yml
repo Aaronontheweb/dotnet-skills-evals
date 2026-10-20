@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least privilege: these jobs only read this repo's code.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------- unit tests
+  test:
+    name: Unit tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the pyproject floor; 3.13/3.14 cover the current stable line.
+        # All three verified locally before being added here.
+        python-version: ["3.11", "3.13", "3.14"]
+    env:
+      DOTNET_SKILLS_REPO: ${{ github.workspace }}/dotnet-skills
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # tests/test_loader.py parses real SKILL.md files out of the dotnet-skills
+      # repo, so it needs that repo on disk. Pinned to a release tag rather than
+      # master: an upstream skill refactor would otherwise break tests here with
+      # no change in this repo (that is exactly how test_oversized_detection rotted).
+      # Bump this ref when you want CI to track newly released skills.
+      - name: Check out dotnet-skills (pinned to v1.7.1)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Aaronontheweb/dotnet-skills
+          ref: v1.7.1
+          path: dotnet-skills
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+
+      # --frozen: never re-resolve. CI installs exactly what uv.lock records.
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Run tests
+        run: uv run --frozen pytest -q
+
+  # ------------------------------------------------------- dataset integrity
+  # Guards the eval data formats without spending API credits. A malformed JSONL
+  # row, a typo'd skill name, or a rubric whose weights don't sum to 1.0 would
+  # otherwise only surface mid-run, or silently skew a score.
+  validate-datasets:
+    name: Validate eval datasets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DOTNET_SKILLS_REPO: ${{ github.workspace }}/dotnet-skills
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check out dotnet-skills (pinned to v1.7.1)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Aaronontheweb/dotnet-skills
+          ref: v1.7.1
+          path: dotnet-skills
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+
+      - name: Check JSONL rows, rubrics, and skill references
+        run: uv run --frozen python scripts/validate-datasets.py
+
+  # ------------------------------------------------------- vulnerability scan
+  # Runs once rather than per matrix entry — the lockfile is interpreter-agnostic.
+  #
+  # No third-party action here on purpose: uv exports the lock (with hashes) and
+  # pip-audit runs ephemerally via uvx. Nothing extra to trust, no API key.
+  audit:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Export locked dependencies
+        run: |
+          uv export --frozen --extra dev --no-emit-project \
+            --format requirements-txt > requirements.audit.txt
+
+      - name: Scan against the PyPI advisory DB
+        # continue-on-error is a KNOWN, TEMPORARY concession: the current lock
+        # carries 66 advisories across 15 packages (aiohttp, litellm, urllib3,
+        # requests, pydantic-adjacent transitives, ...). Flipping this to a hard
+        # gate is the goal — do it in the PR that runs `uv lock --upgrade` and
+        # lands green. Track it in the repo until then.
+        continue-on-error: true
+        run: |
+          # -o pipefail is load-bearing: without it the exit status of the
+          # pipeline is tee's (always 0) and this gate can never fail. Actions'
+          # default shell does not enable pipefail.
+          set -euo pipefail
+          uvx --from pip-audit pip-audit \
+            --require-hashes \
+            --disable-pip \
+            --strict \
+            --progress-spinner off \
+            -r requirements.audit.txt \
+            | tee pip-audit-report.txt
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.2
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.txt
+          retention-days: 30

@@ -1,0 +1,52 @@
+version: 2
+
+updates:
+  # -------------------------------------------------- Python dependencies (uv)
+  # Uses the dedicated `uv` ecosystem so Dependabot updates uv.lock itself,
+  # not just the range in pyproject.toml.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "06:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+
+    # 7-day quarantine on every version bump. A package published <7 days ago
+    # has had no time for a malicious or broken release to be caught by the
+    # community, so Dependabot won't even propose it. This is the mechanism that
+    # enforces the "nothing newer than 7 days" rule automatically.
+    #
+    # Scope note: cooldown applies to VERSION updates only. GitHub's security
+    # updates deliberately bypass it so an emergency CVE fix still lands at once
+    # — that asymmetry is intended, not a gap.
+    cooldown:
+      default-days: 7
+
+    groups:
+      # Bundle low-risk bumps into one PR so the quarantine window doesn't
+      # produce a weekly notification storm.
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # --------------------------------------------------- GitHub Actions workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "06:00"
+      timezone: "America/Chicago"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+
+    cooldown:
+      default-days: 7
