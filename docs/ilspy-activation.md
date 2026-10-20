@@ -116,12 +116,13 @@ tool environment and should be reported separately.
 
 ## Pilot size
 
-Start the revised `seq-queue-retry` case with **3 repetitions per model**. Across
-three models this schedules **18 trials** (3 models × 3 repetitions × 2 arms).
-Five repetitions would schedule **30 trials**. Review transcripts to confirm
+Run the three dependency cases with **3 repetitions per model**. Across
+three models this schedules **54 trials** (3 cases × 3 models × 3 repetitions × 2 arms),
+or 27 matched pairs. Five repetitions would schedule **90 trials**. Review transcripts to confirm
 the research tools work and that the model has a meaningful choice of methods
 before expanding. Neither size supports a precise general activation-rate claim;
-this remains one question about one project/dependency.
+these questions cover one project/dependency. Selecting just one case schedules
+18 trials at three repetitions, or 30 at five repetitions, across three models.
 
 For example, repeat `--model` with each explicit subject model ID:
 
@@ -130,7 +131,8 @@ uv run --frozen dotnet-evals eval-ilspy \
   --model 'openrouter/<provider>/<opus-model-id>' \
   --model 'openrouter/<provider>/<sonnet-model-id>' \
   --model 'openrouter/<provider>/<haiku-model-id>' \
-  --case seq-queue-retry --repetitions 3 \
+  --case seq-queue-retry --case seq-retry-timing --case seq-first-event \
+  --repetitions 3 \
   --output results/ilspy/research-pilot-3x.json
 ```
 
@@ -197,16 +199,16 @@ OS package layers; compare recorded image identities when reproducing results.
 The three dependency cases investigate queue/batch memory bounds and failed
 batches, retry scheduling, and first-event scheduling. Their questions require
 crossing from the checkout into the batching dependency. Prompts name neither
-ILSpy nor decompilation. The queue/retry prompt asks only the operational question,
-without instructing the model to trace dependency implementations. The two
+ILSpy nor decompilation. All three ask operational questions without directing
+the model to inspect a dependency, trace implementations, or identify types and methods. The two
 repository-only controls ask about configuration
 branching and argument validation that are visible directly in the checkout.
 
 The model starts with the project source and restored packages. It may retrieve
 dependency source, search public material, or decompile the installed assembly.
-Those alternatives are identical in both conditions. The remaining two dependency
-prompts still name more implementation details than the revised queue/retry case;
-review them before treating all five cases as an equally natural issue report.
+Those alternatives are identical in both conditions. The retry-timing and
+first-event prompts use the approved issue-report replacements. Repository-only
+controls remain explicit repository investigations and are reported separately.
 
 Reviewer orientation, established by manually inspecting the pinned assembly:
 
