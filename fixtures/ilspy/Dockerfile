@@ -24,6 +24,9 @@ COPY packages.lock.json /opt/fixture/packages.lock.json
 WORKDIR /opt/fixture
 RUN dotnet restore /workspace/repo/src/Serilog.Sinks.Seq/Serilog.Sinks.Seq.csproj \
     --locked-mode -p:NuGetLockFilePath=/opt/fixture/packages.lock.json -p:NuGetAudit=false
+COPY SourceInspector/ /opt/source-inspector-src/
+RUN dotnet publish /opt/source-inspector-src/SourceInspector.csproj \
+    -c Release -o /opt/source-inspector -p:NuGetAudit=false
 COPY manifest.py /opt/fixture/manifest.py
 RUN python3 /opt/fixture/manifest.py > /opt/fixture/manifest.json \
     && chmod 600 /opt/fixture/manifest.json /opt/fixture/manifest.py

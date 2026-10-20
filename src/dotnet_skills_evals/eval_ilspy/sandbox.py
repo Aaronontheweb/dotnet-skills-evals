@@ -27,9 +27,9 @@ def inspect_image(image: str) -> dict:
     return {"id": info["Id"], "repo_digests": info.get("RepoDigests", [])}
 
 
-def capture_command(args: list[str], timeout: int) -> dict:
+def capture_command(args: list[str], timeout: int, stdout_limit: int = 32000) -> dict:
     """Drain both pipes while retaining bounded output, including on the host."""
-    limits = {"stdout": 32000, "stderr": 8000}
+    limits = {"stdout": stdout_limit, "stderr": 8000}
     buffers = {name: bytearray() for name in limits}
     sizes = dict.fromkeys(limits, 0)
     deadline = time.monotonic() + timeout
@@ -99,6 +99,31 @@ class DockerSandbox:
                      "if [ -f /tmp/ilspy-events.jsonl ]; then cat /tmp/ilspy-events.jsonl; fi")
         return [json.loads(line) for line in raw.splitlines() if line.strip()]
 
+    def put_tree(self, source: Path) -> str:
+        destination = f"/tmp/research-{uuid.uuid4().hex}"
+        docker("exec", self.name, "mkdir", "-p", destination)
+        docker("cp", str(source) + "/.", f"{self.name}:{destination}")
+        return destination
+
+    def put_file(self, source: Path) -> str:
+        destination = f"/tmp/research-{uuid.uuid4().hex}"
+        docker("exec", self.name, "mkdir", "-p", destination)
+        docker("cp", str(source), f"{self.name}:{destination}/{source.name}")
+        return f"{destination}/{source.name}"
+
+    def inspect_sources(self, assembly: str, pdb: str | None = None,
+                        document: str | None = None, offset: int = 0) -> dict:
+        args = ["docker", "exec", self.name, "dotnet", "/opt/source-inspector/SourceInspector.dll", assembly,
+                "--offset", str(offset)]
+        if pdb is not None:
+            args.extend(["--pdb", pdb])
+        if document is not None:
+            args.extend(["--document", document])
+        result = capture_command(args, timeout=self.command_timeout + 15, stdout_limit=8 * 1024 * 1024)
+        if result["exit_code"] or result["output_truncated"]:
+            raise ValueError(f"Source metadata inspection failed: {result['stderr']}")
+        return json.loads(result["stdout"])
+
 
 def prepare_fixture(image: str = DEFAULT_IMAGE) -> dict:
     subprocess.run(["docker", "build", "--tag", image, str(FIXTURE_DIR)], check=True)
@@ -114,6 +139,9 @@ def check_fixture(image: str = DEFAULT_IMAGE) -> dict:
     with DockerSandbox(identity["id"]) as sandbox:
         manifest = sandbox.manifest()
         target = manifest["target_assemblies"]["Serilog.Sinks.PeriodicBatching.dll"]
+        source_metadata = sandbox.inspect_sources(target["path"])
+        if not source_metadata["symbolKeys"]:
+            raise RuntimeError("Fixture SourceLink inspector did not read the assembly's debug identity")
         import shlex
 
         assembly = shlex.quote(target["path"])

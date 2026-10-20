@@ -1,5 +1,7 @@
 # Eval results (generated)
 results/
+fixtures/ilspy/SourceInspector/bin/
+fixtures/ilspy/SourceInspector/obj/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

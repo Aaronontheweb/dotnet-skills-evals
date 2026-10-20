@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
+from collections import Counter
 from pathlib import Path
 import random
 import re
@@ -18,14 +19,17 @@ from ..config import OPENROUTER_API_KEY, ensure_skills_repo, get_model_id
 from ..skills.loader import load_skills_from_plugin_json
 from .metrics import score_events, summarize
 from .sandbox import DEFAULT_IMAGE, DockerSandbox, check_fixture
+from .research import ResearchConfig, ResearchTools, RESEARCH_NAMES, RESEARCH_TOOLS, WEB_SEARCH_TOOL, github_token
+from .retrieval import HttpClient
 
 
 DATASET = Path(__file__).resolve().parents[3] / "datasets" / "ilspy" / "seq.jsonl"
 SYSTEM = """You are a .NET development assistant investigating an existing project.
 The repository is at /workspace/repo. The .NET SDK and restored NuGet packages
 are available; NUGET_PACKAGES points to the package cache. Use /tmp for scratch
-files. The checkout and package cache are read-only. Shell commands run in an
-offline container. Investigate the requested behavior and provide evidence.
+files. The checkout and package cache are read-only. Network retrieval is available
+through the provided research tools; downloaded repositories can be searched with
+the shell. Investigate the requested behavior and provide evidence.
 You may load available skills with invoke_skill when useful.
 """
 SHELL_TOOL = {"type": "function", "function": {
@@ -119,7 +123,8 @@ def skill_tool(skills: dict) -> dict:
 
 
 def run_trial(model: str, case: dict, condition: str, snapshot: dict, image: str,
-              fixture: dict, budget: Budget, api_key: str, artifact: Path) -> dict:
+              fixture: dict, budget: Budget, api_key: str, artifact: Path,
+              research_config: ResearchConfig = ResearchConfig(), http: HttpClient | None = None) -> dict:
     skills = available_skills(snapshot, condition)
     messages = [{"role": "system", "content": SYSTEM},
                 {"role": "user", "content": case["user_prompt"]}]
@@ -132,8 +137,11 @@ def run_trial(model: str, case: dict, condition: str, snapshot: dict, image: str
     error = None
     started = time.monotonic()
     sandbox = None
+    research = None
+    searches = 0
     try:
         with DockerSandbox(image, budget.command_seconds) as sandbox:
+            research = ResearchTools(http or HttpClient(artifact.parent / "retrieval-cache"), sandbox, research_config)
             try:
                 for _ in range(budget.max_steps):
                     remaining = budget.trial_seconds - (time.monotonic() - started)
@@ -144,7 +152,8 @@ def run_trial(model: str, case: dict, condition: str, snapshot: dict, image: str
                         status = "token_limit"
                         break
                     response = litellm.completion(
-                        model=model, messages=messages, tools=[SHELL_TOOL, skill_tool(skills)],
+                        model=model, messages=messages,
+                        tools=[SHELL_TOOL, skill_tool(skills), WEB_SEARCH_TOOL, *RESEARCH_TOOLS],
                         api_key=api_key, api_base="https://openrouter.ai/api/v1",
                         temperature=budget.temperature,
                         max_tokens=min(budget.max_completion_tokens, budget.max_total_tokens
@@ -153,12 +162,16 @@ def run_trial(model: str, case: dict, condition: str, snapshot: dict, image: str
                     )
                     prompt_tokens += response.usage.prompt_tokens
                     completion_tokens += response.usage.completion_tokens
+                    usage = response.usage.model_dump()
+                    searches += (usage.get("server_tool_use") or {}).get("web_search_requests", 0)
                     served_models.add(response.model)
                     choice = response.choices[0]
                     message = choice.message.model_dump(exclude_none=True)
                     messages.append(message)
                     records.append({"model": response.model, "request_id": response.id,
-                                    "usage": response.usage.model_dump(),
+                                    "usage": usage,
+                                    "server_tool_calls": getattr(response, "server_tool_calls", None),
+                                    "annotations": message.get("annotations", []),
                                     "finish_reason": choice.finish_reason})
                     if not choice.message.tool_calls:
                         status = "output_limit" if choice.finish_reason == "length" else "completed"
@@ -177,6 +190,8 @@ def run_trial(model: str, case: dict, condition: str, snapshot: dict, image: str
                                 sandbox.command_timeout = min(budget.command_seconds, max(1, int(
                                     budget.trial_seconds - (time.monotonic() - started))))
                                 result = sandbox.shell(args["command"])
+                            elif call.function.name in RESEARCH_NAMES:
+                                result = research.invoke(call.function.name, args)
                             elif call.function.name == "invoke_skill":
                                 name = args.get("skill_name", "")
                                 reference = args.get("reference", "SKILL.md")
@@ -203,10 +218,13 @@ def run_trial(model: str, case: dict, condition: str, snapshot: dict, image: str
     relevant = {sha for name in case["target_assemblies"]
                 for sha in fixture["target_assemblies"][name]["sha256_by_path"].values()}
     artifact.write_text(json.dumps({"messages": messages, "responses": records,
+                                    "research_events": research.events if research else [],
                                     "ilspy_events": events, "error": error}, indent=2), encoding="utf-8")
     return {"model": model, "case_id": case["id"], "category": case["category"],
             "condition": condition, "status": status, "error": error,
             "loaded_skills": sorted(set(loaded)), "served_models": sorted(served_models),
+            "research_tool_calls": dict(Counter(e["tool"] for e in research.events)) if research else {},
+            "web_search_requests": searches,
             "prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
             "elapsed_seconds": time.monotonic() - started, "artifact": str(artifact),
             **score_events(events, relevant)}
@@ -238,6 +256,7 @@ def run_eval(models: tuple[str, ...], dataset: Path = DATASET, repetitions: int 
     if any(v <= 0 for k, v in asdict(budget).items() if k != "temperature"):
         raise ValueError("All budget limits must be positive")
     snapshot, provenance = snapshot_skills(ensure_skills_repo(skills_repo))
+    research_config = ResearchConfig(github_token())
     preflight = check_fixture(image)
     fixture = preflight["fixture"]
     for case in cases:
@@ -251,6 +270,8 @@ def run_eval(models: tuple[str, ...], dataset: Path = DATASET, repetitions: int 
                 "skills": provenance, "api_calls": 0}
     if not OPENROUTER_API_KEY or OPENROUTER_API_KEY == "sk-or-...":
         raise ValueError("Set OPENROUTER_API_KEY in the environment or worktree .env")
+    if not research_config.github_token:
+        raise ValueError("Configure GITHUB_TOKEN, GH_TOKEN, or a local gh login so GitHub code search works in both arms")
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     output = (output or Path("results/ilspy") / f"{timestamp}.json").resolve()
     if output.suffix != ".json":
@@ -273,8 +294,10 @@ def run_eval(models: tuple[str, ...], dataset: Path = DATASET, repetitions: int 
     harness_git = subprocess.run(["git", "-C", str(harness_root), "rev-parse", "HEAD"],
                                  capture_output=True, text=True)
     harness_files = [Path(__file__).parent.parent / "cli.py", *sorted(Path(__file__).parent.glob("*.py"))]
-    report = {"schema_version": 1, "created_at": timestamp,
-              "experiment": "ilspy-skill-availability", "preflight": preflight,
+    http = HttpClient(artifacts / "retrieval-cache")
+    report = {"schema_version": 2, "created_at": timestamp,
+              "experiment": "ilspy-skill-availability-with-research", "preflight": preflight,
+              "research": research_config.provenance(),
               "harness_commit": harness_git.stdout.strip() or None,
               "harness_files_sha256": {str(p.relative_to(harness_root)): hashlib.sha256(p.read_bytes()).hexdigest()
                                        for p in harness_files},
@@ -292,7 +315,7 @@ def run_eval(models: tuple[str, ...], dataset: Path = DATASET, repetitions: int 
                 console.print(f"{pair_id} {model} {case['id']} repeat={repeat} {condition}", markup=False)
                 trial = run_trial(model, case, condition, snapshot, preflight["image"]["id"],
                                   fixture, budget, OPENROUTER_API_KEY,
-                                  artifacts / f"{pair_id}-{condition}.json")
+                                  artifacts / f"{pair_id}-{condition}.json", research_config, http)
                 trial.update(pair_id=pair_id, repetition=repeat, order=conditions.index(condition))
                 report["trials"].append(trial)
                 report["summary"] = summarize(report["trials"])
