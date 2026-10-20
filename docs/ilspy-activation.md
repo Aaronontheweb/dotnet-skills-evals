@@ -132,7 +132,9 @@ OS package layers; compare recorded image identities when reproducing results.
 The three dependency cases investigate queue/batch memory bounds and failed
 batches, retry scheduling, and first-event scheduling. Their questions require
 crossing from the checkout into the batching dependency. Prompts name neither
-ILSpy nor decompilation. The two repository-only controls ask about configuration
+ILSpy nor decompilation. The queue/retry prompt asks only the operational question,
+without instructing the model to trace dependency implementations. The two
+repository-only controls ask about configuration
 branching and argument validation that are visible directly in the checkout.
 
 The model receives the project source and restored packages, but no dependency
