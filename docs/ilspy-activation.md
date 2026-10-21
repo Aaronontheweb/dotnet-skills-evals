@@ -307,12 +307,11 @@ in a tool description, and its skill files live on the host, accessible through
 containers. These diagnostics establish what this custom loop supplied and did;
 they do not establish parity with Claude Code or Codex.
 
-Before another paid comparison, choose and implement a specific native loading
-profile: match its startup listing and loading instructions, provide skill paths
-and readable supporting files where appropriate, and retain lazy loading. Keep
-the baseline/treatment difference limited to the target skill. Treat that profile
-change as a new experiment; do not pool its results with the historical custom
-loop. The diagnostic update alone does not resolve these fidelity gaps.
+This controlled loop can test whether skill availability changes ILSpy use in
+this environment. Native-harness fidelity is not a prerequisite for that
+comparison. Claims specifically about Claude Code or Codex would require a
+separate native-harness evaluation. Keep the baseline/treatment difference limited
+to the target skill, and report results from different harness profiles separately.
 
 Instrumentation wraps the installed `ilspycmd` entry point, including its normal
 absolute path, plus `dnx ilspycmd`. The real executable and DLL can be invoked
@@ -363,6 +362,8 @@ request hashes when processing newly captured artifacts.
 
 See [the saved-run diagnostic summary](ilspy-results-2026-10-20.md) for the
 completed pilot and separately reported, user-stopped prompt-only rerun.
+The [2026-10-21 rerun](ilspy-results-2026-10-21.md) completed the same 54-trial
+comparison using the existing harness and updated diagnostics.
 
 Deterministic checks, with no paid API calls:
 

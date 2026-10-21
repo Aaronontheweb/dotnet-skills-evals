@@ -78,6 +78,7 @@ diagnostic-code hashes, original run status and provenance, recomputed scores,
 paired diagnostics, and all-saved-trial stopping reasons. Raw and derived results
 remain ignored by Git; this document is the reviewable summary.
 
-Paid evals remain stopped. The current `custom-tool-index-v1` profile still needs
-alignment with a chosen native harness loading flow before another paid batch;
-see [harness fidelity and measurement details](ilspy-activation.md#harness-fidelity).
+Paid evals were stopped at the time of this reanalysis. A subsequent authorized
+[2026-10-21 rerun](ilspy-results-2026-10-21.md) used the same custom harness with
+updated diagnostics. Native-harness alignment is a separate question; see
+[harness fidelity and measurement details](ilspy-activation.md#harness-fidelity).
