@@ -18,6 +18,7 @@ import litellm
 from ..config import OPENROUTER_API_KEY, ensure_skills_repo, get_model_id
 from ..skills.loader import load_skills_from_plugin_json
 from .metrics import score_events, summarize
+from .diagnostics import json_sha256, trial_diagnostics
 from .sandbox import DEFAULT_IMAGE, DockerSandbox, check_fixture
 from .research import ResearchConfig, ResearchTools, RESEARCH_NAMES, RESEARCH_TOOLS, WEB_SEARCH_TOOL, github_token
 from .retrieval import HttpClient
@@ -130,6 +131,15 @@ def run_trial(model: str, case: dict, condition: str, snapshot: dict, image: str
     skills = available_skills(snapshot, condition)
     messages = [{"role": "system", "content": SYSTEM},
                 {"role": "user", "content": case["user_prompt"]}]
+    tools = [SHELL_TOOL, skill_tool(skills), WEB_SEARCH_TOOL, *RESEARCH_TOOLS]
+    request_context = json.loads(json.dumps({
+        "harness_profile": "custom-tool-index-v1", "initial_messages": messages, "tools": tools,
+        "skill_catalog": [{"name": name, "description": skill["description"]} for name, skill in skills.items()],
+        "skill_index_location": "invoke_skill.function.description",
+    }))
+    tools_sha256 = json_sha256(request_context["tools"])
+    requests = []
+    skill_reads = []
     loaded = []
     records = []
     events = []
@@ -153,15 +163,22 @@ def run_trial(model: str, case: dict, condition: str, snapshot: dict, image: str
                     if prompt_tokens + completion_tokens >= budget.max_total_tokens:
                         status = "token_limit"
                         break
-                    response = litellm.completion(
-                        model=model, messages=messages,
-                        tools=[SHELL_TOOL, skill_tool(skills), WEB_SEARCH_TOOL, *RESEARCH_TOOLS],
-                        api_key=api_key, api_base="https://openrouter.ai/api/v1",
-                        temperature=budget.temperature,
-                        max_tokens=min(budget.max_completion_tokens, budget.max_total_tokens
-                                       - prompt_tokens - completion_tokens),
-                        timeout=min(budget.request_seconds, remaining), num_retries=0, caching=False,
-                    )
+                    parameters = {
+                        "model": model, "api_base": "https://openrouter.ai/api/v1",
+                        "temperature": budget.temperature,
+                        "max_tokens": min(budget.max_completion_tokens, budget.max_total_tokens
+                                          - prompt_tokens - completion_tokens),
+                        "timeout": min(budget.request_seconds, remaining), "num_retries": 0, "caching": False,
+                    }
+                    # The final transcript plus this prefix length reconstructs
+                    # every request without storing repeated histories or keys.
+                    request_messages = json.loads(json.dumps(messages))
+                    request_tools = json.loads(json.dumps(request_context["tools"]))
+                    requests.append({**parameters, "message_count": len(messages),
+                                     "messages_sha256": json_sha256(request_messages), "tools_sha256": tools_sha256,
+                                     "started_at": time.time()})
+                    response = litellm.completion(**parameters, messages=request_messages,
+                                                 tools=request_tools, api_key=api_key)
                     prompt_tokens += response.usage.prompt_tokens
                     completion_tokens += response.usage.completion_tokens
                     usage = response.usage.model_dump()
@@ -202,6 +219,8 @@ def run_trial(model: str, case: dict, condition: str, snapshot: dict, image: str
                                     result = {"error": "Unknown skill or reference"}
                                 else:
                                     loaded.append(name)
+                                    skill_reads.append({"skill_name": name, "reference": reference,
+                                                        "tool_call_id": call.id, "loaded_at": time.time()})
                                     result = {"content": skills[name]["files"][reference],
                                               "references": list(skills[name]["files"])}
                             else:
@@ -220,9 +239,12 @@ def run_trial(model: str, case: dict, condition: str, snapshot: dict, image: str
         error = str(exc).replace(api_key, "[REDACTED]") if api_key else str(exc)
     relevant = {sha for name in case["target_assemblies"]
                 for sha in fixture["target_assemblies"][name]["sha256_by_path"].values()}
-    artifact.write_text(json.dumps({"messages": messages, "responses": records,
-                                    "research_events": research.events if research else [],
-                                    "ilspy_events": events, "error": error}, indent=2), encoding="utf-8")
+    evidence = {"messages": messages, "responses": records, "request_context": request_context,
+                "requests": requests, "skill_reads": skill_reads,
+                "research_events": research.events if research else [], "ilspy_events": events, "error": error}
+    diagnostics = trial_diagnostics({"condition": condition}, evidence, relevant)
+    evidence["skill_diagnostics"] = diagnostics
+    artifact.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
     return {"model": model, "case_id": case["id"], "category": case["category"],
             "condition": condition, "status": status, "error": error,
             "loaded_skills": sorted(set(loaded)), "served_models": sorted(served_models),
@@ -230,6 +252,7 @@ def run_trial(model: str, case: dict, condition: str, snapshot: dict, image: str
             "web_search_requests": searches,
             "prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
             "elapsed_seconds": time.monotonic() - started, "artifact": str(artifact),
+            "skill_diagnostics": diagnostics,
             **score_events(events, relevant)}
 
 
@@ -298,8 +321,9 @@ def run_eval(models: tuple[str, ...], dataset: Path = DATASET, repetitions: int 
                                  capture_output=True, text=True)
     harness_files = [Path(__file__).parent.parent / "cli.py", *sorted(Path(__file__).parent.glob("*.py"))]
     http = HttpClient(artifacts / "retrieval-cache")
-    report = {"schema_version": 2, "created_at": timestamp,
+    report = {"schema_version": 3, "created_at": timestamp,
               "experiment": "ilspy-skill-availability-with-research", "preflight": preflight,
+              "harness_profile": "custom-tool-index-v1",
               "research": research_config.provenance(),
               "harness_commit": harness_git.stdout.strip() or None,
               "harness_files_sha256": {str(p.relative_to(harness_root)): hashlib.sha256(p.read_bytes()).hexdigest()
@@ -323,8 +347,10 @@ def run_eval(models: tuple[str, ...], dataset: Path = DATASET, repetitions: int 
                 report["trials"].append(trial)
                 report["summary"] = summarize(report["trials"])
                 write_report(output, report)
-                console.print(f"  status={trial['status']} activated={trial['activated']} "
-                              f"skill_loaded={'ilspy-decompile' in trial['loaded_skills']}", markup=False)
+                diagnostics = trial.get("skill_diagnostics", {})
+                console.print(f"  status={trial['status']} target_decompiled={trial['activated']} "
+                              f"index_present={diagnostics.get('target_index_present')} "
+                              f"body_loaded={diagnostics.get('target_body_loaded')}", markup=False)
                 # A broken provider credential/route should not consume the full
                 # matrix. Preserve partial evidence and stop on the first error.
                 if trial["status"] == "error":

@@ -272,6 +272,48 @@ This initial dataset covers one project and one dependency; it does not establis
 general behavior across OSS projects, and successful tool use does not establish
 that the final answer is correct.
 
+### Exposure, loading, and execution diagnostics
+
+**Availability includes the index entry.** The name and description can cue an
+ILSpy command without the model ever opening `SKILL.md`. Such execution counts
+toward the primary outcome. A zero body-load count does not establish zero impact
+from making the skill available.
+
+Schema version 3 adds `skill_diagnostics` to trial records and transcripts:
+
+| Diagnostic | Evidence |
+| --- | --- |
+| `target_index_present`, `index_evidence` | Whether the outgoing skill-router description includes the target entry. This records inclusion in a request, not proof the model attended to it. Historical reports can reconstruct inclusion from condition and skill-snapshot provenance; they label that evidence separately. |
+| `skill_reads`, `target_body_loaded` | Successful `invoke_skill` results, matched by tool-call ID. Failed requests do not count. `SKILL.md` reads are distinguished from reference reads. |
+| `target_body_in_model_request` | Whether a subsequent model request actually included the returned instructions. A shell call in the same response as a skill-load call has not yet received those instructions. |
+| `target_reference_reads` | Successful reads of the target skill's supporting markdown, including repeated reads. |
+| `target_execution_without_body_load`, `target_execution_after_body_load` | Successful target decompilation before/after the first model request containing the body. Missing historical timing is unknown, not a zero. Neither label attributes motivation or causation. A trial can have both kinds of execution. |
+
+The `summary` retains the existing execution rates and adds per-arm `diagnostics`
+using **only valid matched pairs**, plus `saved_trials` with stopping reasons for
+**all saved trials**, including excluded partners. The console shows these
+denominators separately. Attempts, successful decompilation of any assembly, and
+successful target decompilation remain separate measurements. Reference reads
+count requests; other diagnostic counts are trials.
+
+The legacy `loaded_skills` field records any successful file read for a skill;
+use `skill_diagnostics.target_body_loaded` for a precise body-load measurement.
+
+### Harness fidelity
+
+The current profile is explicitly named `custom-tool-index-v1`. Its catalog lives
+in a tool description, and its skill files live on the host, accessible through
+`invoke_skill`. There are no native skill directories or paths in trial
+containers. These diagnostics establish what this custom loop supplied and did;
+they do not establish parity with Claude Code or Codex.
+
+Before another paid comparison, choose and implement a specific native loading
+profile: match its startup listing and loading instructions, provide skill paths
+and readable supporting files where appropriate, and retain lazy loading. Keep
+the baseline/treatment difference limited to the target skill. Treat that profile
+change as a new experiment; do not pool its results with the historical custom
+loop. The diagnostic update alone does not resolve these fidelity gaps.
+
 Instrumentation wraps the installed `ilspycmd` entry point, including its normal
 absolute path, plus `dnx ilspycmd`. The real executable and DLL can be invoked
 directly to bypass those wrappers. Review transcripts for alternative invocation
@@ -289,6 +331,38 @@ with the same stem stores each conversation, model usage, tool results, and
 research tool events, search usage/citations and ILSpy execution events. Generated decompilation files are ephemeral; their
 hashes and paths are retained. Containers are removed on exit. Results are
 ignored by Git.
+
+New transcripts also contain `request_context`: the exact initial messages,
+condition-specific catalog, and tool definitions supplied to LiteLLM. Each
+`requests` entry records the request parameters, timestamp, transcript-prefix
+length, and hashes of its messages and tools. The prefix reconstructs that
+request's history without duplicating the full conversation on every step.
+Credentials are not included. This captures the client's input to LiteLLM;
+OpenRouter's downstream transformation or provider rendering is not recorded.
+
+### Re-summarize saved results without API calls
+
+```bash
+uv run --frozen dotnet-evals summarize-ilspy \
+  results/ilspy/original-run.json \
+  --output results/ilspy/original-run-diagnostics.json
+```
+
+This command needs no credentials, Docker, or skill checkout. It re-scores saved
+wrapper events against the original fixture hashes, extracts successful skill
+reads from the transcripts, and writes a **new** report. Original reports and
+transcripts are preserved; an existing output path is rejected. Keep transcripts
+beside the original report in its same-stem directory when moving a results
+bundle. Missing transcripts cause an error rather than invented zeros.
+
+Derived reports retain the original run status, schedule, budgets and harness
+provenance. `reanalysis` records input hashes, diagnostic-code hashes, and any
+execution-score changes. Historical requests that were not captured stay
+unavailable; reconstructed exposure is explicitly labeled. The CLI verifies
+request hashes when processing newly captured artifacts.
+
+See [the saved-run diagnostic summary](ilspy-results-2026-10-20.md) for the
+completed pilot and separately reported, user-stopped prompt-only rerun.
 
 Deterministic checks, with no paid API calls:
 

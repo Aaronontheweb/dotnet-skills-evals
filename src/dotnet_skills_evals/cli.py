@@ -575,7 +575,7 @@ def eval_ilspy(models, dataset, case_ids, repetitions, skills_repo, image, outpu
                command_seconds, request_seconds, temperature, preflight_only):
     """Measure actual ILSpy activation uplift with versus without its skill."""
     from .eval_ilspy.runner import Budget, DATASET, run_eval
-    from rich.table import Table
+    from .eval_ilspy.reporting import print_results
 
     try:
         result = run_eval(
@@ -595,14 +595,20 @@ def eval_ilspy(models, dataset, case_ids, repetitions, skills_repo, image, outpu
         configured = result["research"]["github_authenticated"]
         console.print(f"GitHub credential configured: {configured} (not validated by preflight)")
         return
-    table = Table(title="ILSpy execution: paired baseline versus skill availability")
-    for title in ("Model", "Cases", "Valid pairs", "Excluded", "Baseline", "Skill", "Uplift (pp)"):
-        table.add_column(title)
-    for model, groups in result["summary"].items():
-        for category, values in groups.items():
-            n = values["valid_pairs"]
-            table.add_row(model, category, str(n), str(values["excluded_pairs"]),
-                          f"{values['baseline_rate']:.1%}" if n else "—",
-                          f"{values['skill_rate']:.1%}" if n else "—",
-                          f"{values['uplift_percentage_points']:+.1f}" if n else "—")
-    console.print(table)
+    print_results(result, console)
+
+
+@cli.command("summarize-ilspy")
+@click.argument("report", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--output", type=click.Path(path_type=Path), required=True,
+              help="New derived JSON report; existing files are never overwritten.")
+def summarize_ilspy(report: Path, output: Path):
+    """Re-score saved ILSpy artifacts and show diagnostics. No API calls or Docker."""
+    from .eval_ilspy.reporting import print_results, reanalyze_report
+
+    try:
+        result = reanalyze_report(report, output)
+    except (ValueError, KeyError, OSError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    print_results(result, console)
+    console.print(f"Derived report: {output}. API calls: 0", markup=False)

@@ -7,16 +7,42 @@ import math
 
 
 VALID_STATUSES = {"completed", "step_limit", "token_limit", "time_limit", "output_limit"}
+BUDGET_STATUSES = {"step_limit", "token_limit", "time_limit", "output_limit"}
+
+
+def successful_decompilations(events: list[dict]) -> list[dict]:
+    return [e for e in events if e.get("phase") == "finished"
+            and e.get("decompilation_requested") and e.get("returncode") == 0
+            and e.get("assemblies") and (e.get("stdout_is_code") or e.get("generated_files"))]
 
 
 def score_events(events: list[dict], relevant_hashes: set[str]) -> dict:
     attempted = any(e.get("decompilation_requested") for e in events)
-    successful = [e for e in events if e.get("phase") == "finished"
-                  and e.get("decompilation_requested") and e.get("returncode") == 0
-                  and e.get("assemblies")
-                  and (e.get("stdout_is_code") or e.get("generated_files"))]
+    successful = successful_decompilations(events)
     relevant = any(set(e["assemblies"].values()) & relevant_hashes for e in successful)
     return {"attempted": attempted, "any_decompilation": bool(successful), "activated": relevant}
+
+
+def summarize_diagnostics(rows: list[dict]) -> dict:
+    """Counts use the same valid matched trials as the primary endpoint."""
+    diagnostics = [r.get("skill_diagnostics", {}) for r in rows]
+    return {"trials": len(rows),
+            "index_present": sum(d.get("target_index_present") is True for d in diagnostics),
+            "index_unknown": sum(d.get("target_index_present") is None for d in diagnostics),
+            "index_evidence": {source: sum(d.get("index_evidence", "unavailable") == source for d in diagnostics)
+                               for source in sorted({d.get("index_evidence", "unavailable") for d in diagnostics})},
+            "body_loaded": sum(d.get("target_body_loaded") is True for d in diagnostics),
+            "body_load_unknown": sum("target_body_loaded" not in d for d in diagnostics),
+            "body_in_model_request": sum(d.get("target_body_in_model_request") is True for d in diagnostics),
+            "body_in_model_request_unknown": sum(d.get("target_body_in_model_request") is None for d in diagnostics),
+            "reference_reads": sum(len(d.get("target_reference_reads", [])) for d in diagnostics),
+            "attempted": sum(r["attempted"] for r in rows),
+            "any_decompilation": sum(r["any_decompilation"] for r in rows),
+            "target_decompilation": sum(r["activated"] for r in rows),
+            "target_without_body_load": sum(d.get("target_execution_without_body_load") is True for d in diagnostics),
+            "target_after_body_load": sum(d.get("target_execution_after_body_load") is True for d in diagnostics),
+            "target_load_order_unknown": sum(r["activated"] and d.get("target_execution_without_body_load") is None
+                                             for r, d in zip(rows, diagnostics))}
 
 
 def summarize(trials: list[dict]) -> dict:
@@ -58,5 +84,13 @@ def summarize(trials: list[dict]) -> dict:
                 "skill_loaded": sum("ilspy-decompile" in p["skill"]["loaded_skills"] for p in valid),
                 "baseline_attempts": sum(p["baseline"]["attempted"] for p in valid),
                 "skill_attempts": sum(p["skill"]["attempted"] for p in valid),
+                "diagnostics": {condition: summarize_diagnostics([p[condition] for p in valid])
+                                for condition in ("baseline", "skill")},
+                "saved_trials": {condition: {
+                    "trials": sum(t["condition"] == condition for t in rows),
+                    "statuses": dict(Counter(t["status"] for t in rows if t["condition"] == condition)),
+                    "budget_limited": sum(t["status"] in BUDGET_STATUSES for t in rows
+                                          if t["condition"] == condition),
+                } for condition in ("baseline", "skill")},
             }
     return groups
