@@ -223,11 +223,12 @@ def main() -> int:
 
     # Execution-based ILSpy cases have their own schema. No Docker/API calls.
     try:
-        ilspy_cases = read_ilspy_dataset(ILSPY_DATASET)
+        for dataset in sorted(ILSPY_DATASET.parent.glob("*.jsonl")):
+            ilspy_cases = read_ilspy_dataset(dataset)
+            print(f"ilspy/{dataset.name}: {len(ilspy_cases)} cases")
         if "ilspy-decompile" not in known:
             rep.error("ILSpy eval requires ilspy-decompile in the skill catalog")
         referenced.add("ilspy-decompile")
-        print(f"ilspy/{ILSPY_DATASET.name}: {len(ilspy_cases)} cases")
     except (ValueError, OSError) as exc:
         rep.error(f"ILSpy dataset: {exc}")
 

@@ -138,8 +138,11 @@ class DockerSandbox:
         return json.loads(result["stdout"])
 
 
-def prepare_fixture(image: str = DEFAULT_IMAGE) -> dict:
-    subprocess.run(["docker", "build", "--tag", image, str(FIXTURE_DIR)], check=True)
+def prepare_fixture(image: str = DEFAULT_IMAGE, fixture: str = "seq") -> dict:
+    if fixture not in {"seq", "petabridge-cmd"}:
+        raise ValueError(f"Unknown ILSpy fixture: {fixture}")
+    directory = FIXTURE_DIR if fixture == "seq" else FIXTURE_DIR / fixture
+    subprocess.run(["docker", "build", "--tag", image, str(directory)], check=True)
     # The real execution control catches an unusable tool or broken telemetry
     # before any API credits are spent.
     return check_fixture(image)
@@ -151,7 +154,17 @@ def check_fixture(image: str = DEFAULT_IMAGE) -> dict:
     identity = inspect_image(image)
     with DockerSandbox(identity["id"]) as sandbox:
         manifest = sandbox.manifest()
-        target = manifest["target_assemblies"]["Serilog.Sinks.PeriodicBatching.dll"]
+        control = manifest.get("execution_control", {
+            "assembly": "Serilog.Sinks.PeriodicBatching.dll",
+            "type": "Serilog.Sinks.PeriodicBatching.PeriodicBatchingSink",
+            "marker": "PeriodicBatchingSink",
+        })
+        target = manifest["target_assemblies"][control["assembly"]]
+        if "runtime_command" in control:
+            runtime = sandbox.shell(control["runtime_command"])
+            if runtime["exit_code"] or any(marker not in runtime["stdout"]
+                                           for marker in control["runtime_markers"]):
+                raise RuntimeError(f"Fixture runtime reproduction failed: {runtime}")
         source_metadata = sandbox.inspect_sources(target["path"])
         if not source_metadata["symbolKeys"]:
             raise RuntimeError("Fixture SourceLink inspector did not read the assembly's debug identity")
@@ -163,8 +176,8 @@ def check_fixture(image: str = DEFAULT_IMAGE) -> dict:
         sandbox.shell(f"ilspycmd -l c {assembly}")
         if score_events(sandbox.events(), {target["sha256"]})["activated"]:
             raise RuntimeError("ILSpy help/type listing was incorrectly scored as activation")
-        result = sandbox.shell(f"ilspycmd -t Serilog.Sinks.PeriodicBatching.PeriodicBatchingSink {assembly}")
-        if result["exit_code"] or "PeriodicBatchingSink" not in result["stdout"]:
+        result = sandbox.shell(f"ilspycmd -t {shlex.quote(control['type'])} {assembly}")
+        if result["exit_code"] or control["marker"] not in result["stdout"]:
             raise RuntimeError(f"ILSpy fixture decompilation failed: {result}")
         if not score_events(sandbox.events(), {target["sha256"]})["activated"]:
             raise RuntimeError("Real dependency decompilation produced no activation evidence")

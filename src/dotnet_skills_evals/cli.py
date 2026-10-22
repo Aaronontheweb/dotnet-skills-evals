@@ -539,13 +539,16 @@ def scaffold_variants(
 
 
 @cli.command("prepare-ilspy")
-@click.option("--image", default="dotnet-evals-ilspy:seq-7.0.0", show_default=True)
-def prepare_ilspy(image: str):
+@click.option("--fixture", type=click.Choice(["seq", "petabridge-cmd"]), default="seq", show_default=True)
+@click.option("--image", default=None, help="Image tag; defaults to the selected fixture's tag.")
+def prepare_ilspy(image: str | None, fixture: str):
     """Build and check the pinned offline fixture. No API key or model calls."""
     from .eval_ilspy.sandbox import prepare_fixture
 
     try:
-        result = prepare_fixture(image)
+        image = image or ("dotnet-evals-ilspy:seq-7.0.0" if fixture == "seq"
+                          else "dotnet-evals-ilspy:petabridge-cmd-1.5.2")
+        result = prepare_fixture(image, fixture)
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         raise click.ClickException(str(exc)) from exc
     console.print(f"Fixture ready: {result['image']['id']}", markup=False)

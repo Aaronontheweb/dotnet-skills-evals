@@ -322,6 +322,45 @@ agent; trials can write their `/tmp` telemetry. The source, tool installation,
 packages, and root filesystem are read-only, and trial containers receive no
 host mounts or provider keys. Shell output is drained with bounded host buffers.
 
+## Petabridge.Cmd case
+
+`datasets/ilspy/petabridge-cmd.jsonl` contains a separate support-console case using
+`Petabridge.Cmd.Common` 1.5.2, the command parser used by Petabridge.Cmd. The small
+application demonstrates quote characters changing before its echo handler
+receives the message. The prompt asks for the cause and a reliable way to preserve
+the message; it does not suggest a tool or mention source availability.
+
+The package is downloaded from NuGet with a committed dependency lock. Its matching
+source repository is not publicly accessible. Research tools remain available in
+both arms. Only successful decompilation of `Petabridge.Cmd.Common.dll` counts as
+the primary endpoint; answer correctness remains ungraded.
+
+The fixture derives from the Seq image to retain the same SDK, ILSpy wrappers and
+source metadata helper. It replaces the project checkout with a deterministic Git
+snapshot of the support console, and builds it so local execution works offline.
+The original Seq dataset and image remain separate.
+
+```bash
+# Prepare the common base first if it is not already present.
+uv run --frozen dotnet-evals prepare-ilspy
+uv run --frozen dotnet-evals prepare-ilspy --fixture petabridge-cmd
+
+# Independent case: three repetitions, both conditions, per selected model.
+uv run --frozen dotnet-evals eval-ilspy \
+  --dataset datasets/ilspy/petabridge-cmd.jsonl \
+  --case petabridge-cmd-quotes \
+  --image dotnet-evals-ilspy:petabridge-cmd-1.5.2 \
+  --model openrouter/anthropic/claude-opus-5.5 \
+  --model openrouter/anthropic/claude-sonnet-5.5 \
+  --model openrouter/anthropic/claude-haiku-5.5 \
+  --repetitions 3 --max-total-tokens 200000 \
+  --output results/ilspy/petabridge-cmd-independent.json
+```
+
+Add `--preflight-only` to check the fixture and count the 18 planned trials without
+model API calls. Use a fresh output path for each run. The runtime reproduction,
+dependency hashes and real ILSpy execution control are checked before paid runs.
+
 ## Results and local checks
 
 The chosen `--output` JSON is checkpointed after every trial. It includes the
