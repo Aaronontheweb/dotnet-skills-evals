@@ -564,7 +564,7 @@ def prepare_ilspy(image: str):
 @click.option("--seed", type=int, default=42, show_default=True)
 @click.option("--max-steps", type=click.IntRange(min=1), default=30, show_default=True)
 @click.option("--max-completion-tokens", type=click.IntRange(min=1), default=8192, show_default=True)
-@click.option("--max-total-tokens", type=click.IntRange(min=1), default=100000, show_default=True)
+@click.option("--max-total-tokens", type=click.IntRange(min=1), default=200000, show_default=True)
 @click.option("--trial-seconds", type=click.IntRange(min=1), default=900, show_default=True)
 @click.option("--command-seconds", type=click.IntRange(min=1), default=60, show_default=True)
 @click.option("--request-seconds", type=click.IntRange(min=1), default=180, show_default=True)

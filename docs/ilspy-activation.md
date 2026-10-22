@@ -175,7 +175,7 @@ condition order are randomized using the recorded `--seed` (default 42).
 
 Budget flags include `--max-steps`, `--max-completion-tokens`, `--max-total-tokens`,
 `--trial-seconds`, `--request-seconds`, and `--command-seconds`. Defaults are 30 model decisions, 8,192
-completion tokens per request, a 100,000 total-token stopping threshold, 900
+completion tokens per request, a 200,000 total-token stopping threshold, 900
 seconds per trial, 180 seconds per model request, and 60 seconds per shell command.
 Increase `--request-seconds` for models that need longer reasoning requests, within
 the trial's remaining time. Prompt tokens count toward

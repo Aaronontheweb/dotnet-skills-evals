@@ -45,7 +45,7 @@ SHELL_TOOL = {"type": "function", "function": {
 class Budget:
     max_steps: int = 30
     max_completion_tokens: int = 8192
-    max_total_tokens: int = 100000
+    max_total_tokens: int = 200000
     trial_seconds: int = 900
     command_seconds: int = 60
     temperature: float = 0.0
