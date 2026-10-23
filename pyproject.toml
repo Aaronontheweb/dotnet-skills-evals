@@ -44,6 +44,11 @@ build-backend = "hatchling.build"
 # records it for that one run - the next lock without the flag drops it).
 # Keep this in sync with Dependabot's cooldown: default-days: 7.
 exclude-newer = "7 days"
+# Emergency security update for PYSEC-2026-4320 / GHSA-6q48-6c7w-9gw2:
+# certifi 2026.10.19 removes compromised CA trust. Admit its Oct 20 artifacts
+# without admitting newer certifi releases or bypassing other packages' cooldown.
+# Remove this override after 2026-10-27, once the fixed artifacts are 7 days old.
+exclude-newer-package = { certifi = "2026-10-21T00:00:00Z" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dotnet_skills_evals"]
