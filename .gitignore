@@ -1,5 +1,9 @@
 # Eval results (generated)
 results/
+fixtures/ilspy/SourceInspector/bin/
+fixtures/ilspy/SourceInspector/obj/
+fixtures/ilspy/petabridge-cmd/app/bin/
+fixtures/ilspy/petabridge-cmd/app/obj/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

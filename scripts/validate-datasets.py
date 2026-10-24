@@ -31,6 +31,7 @@ from dotnet_skills_evals.config import (
     ensure_skills_repo,
 )
 from dotnet_skills_evals.skills.loader import load_all_skills
+from dotnet_skills_evals.eval_ilspy.runner import DATASET as ILSPY_DATASET, read_dataset as read_ilspy_dataset
 
 # Keys the runners index directly with case["..."] - a missing one is a hard error.
 ACTIVATION_REQUIRED = ("id", "user_prompt", "expected_skills")
@@ -219,6 +220,17 @@ def main() -> int:
                 validate_rubric(rubric_file, skill or "", source, rep, loaded_rubrics)
                 referenced.add(skill or "")
         print(f"effectiveness/{path.name}: {len(cases)} cases")
+
+    # Execution-based ILSpy cases have their own schema. No Docker/API calls.
+    try:
+        for dataset in sorted(ILSPY_DATASET.parent.glob("*.jsonl")):
+            ilspy_cases = read_ilspy_dataset(dataset)
+            print(f"ilspy/{dataset.name}: {len(ilspy_cases)} cases")
+        if "ilspy-decompile" not in known:
+            rep.error("ILSpy eval requires ilspy-decompile in the skill catalog")
+        referenced.add("ilspy-decompile")
+    except (ValueError, OSError) as exc:
+        rep.error(f"ILSpy dataset: {exc}")
 
     # --- Orphaned rubrics: present but never exercised ---
     on_disk = {p.name for p in RUBRICS_DIR.glob("*.yaml")}

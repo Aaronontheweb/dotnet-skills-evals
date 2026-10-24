@@ -1,0 +1,10 @@
+*
+!Dockerfile
+!packages.lock.json
+!manifest.py
+!ilspy_probe.py
+!SourceInspector/
+!SourceInspector/*.cs
+!SourceInspector/*.csproj
+**/bin/
+**/obj/
